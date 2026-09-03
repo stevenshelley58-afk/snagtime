@@ -51,7 +51,7 @@ export type BookingSummary = {
   eventTitleSnapshot: string; locationType: "GOOGLE_MEET" | "PHONE" | "IN_PERSON" | "CUSTOM";
   locationValue: string | null; calendarProvider: "google" | "local" | "provider_recovery_required";
   inviteeTimeZone: string; startAt: string; endAt: string;
-  status: "PENDING_PAYMENT" | "CONFIRMED" | "CANCELLED" | "RESCHEDULED";
+  status: "PENDING_PAYMENT" | "CONFIRMED" | "CANCELLED" | "RESCHEDULED" | "COMPLETED";
   notes: string | null; calendarSyncStatus: "LOCAL" | "PENDING" | "SYNCED" | "FAILED";
   notificationStatus: "PENDING" | "GOOGLE_UPDATE_ACCEPTED" | "LOCAL_NO_EMAIL" | "RETRY_PENDING";
   cancellationReason: string | null; hostName: string;
@@ -75,6 +75,8 @@ export type UpdateEventTypeInput = Partial<CreateEventTypeInput>;
 export type CreateBookingInput = {
   startAt: string; inviteeName: string; inviteeEmail: string; inviteeTimeZone: string;
   notes?: string; durationId?: string; answers?: Array<{ questionId: string; value: unknown }>;
+  /** Opaque Blockwise invitation/reference; never a workspace identifier. */
+  blockwiseReference?: string;
 };
 export type CreateBookingResult = {
   bookingId: string; status: BookingSummary["status"]; checkoutUrl: string | null;

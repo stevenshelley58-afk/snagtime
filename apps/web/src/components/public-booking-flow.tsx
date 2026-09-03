@@ -20,6 +20,7 @@ const fallbackTimeZones = ["UTC", "America/Chicago", "America/New_York", "Americ
 const supportedTimeZones = typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : fallbackTimeZones;
 const timeZones = ["UTC", ...supportedTimeZones.filter((zone) => zone !== "UTC")];
 const publicEventRequests = new Map<string, Promise<EventType>>();
+const FREE_ONLY = process.env.NEXT_PUBLIC_FREE_ONLY === "true";
 
 function loadPublicEvent(slug: string) {
   const existing = publicEventRequests.get(slug);
@@ -110,7 +111,9 @@ export function PublicBookingFlow({ slug }: { slug: string }) {
       if (!active) return;
       setEvent(item);
       setLoadingSlots(true);
-      setDuration(item.durations.find((option) => option.isDefault) ?? item.durations[0] ?? null);
+      const durations = FREE_ONLY ? item.durations.filter((option) => !option.price) : item.durations;
+      setEvent({ ...item, durations });
+      setDuration(durations.find((option) => option.isDefault) ?? durations[0] ?? null);
     }).catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : "This booking page is unavailable."); }).finally(() => { if (active) setLoadingEvent(false); });
     return () => { active = false; };
   }, [slug]);

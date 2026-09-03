@@ -4,6 +4,7 @@ import { db } from "@/server/db";
 import { AppError, unauthorized } from "@/server/errors";
 import { enterDatabaseContext } from "@/server/db-context";
 import { systemEmailIdentity } from "@/server/email-config";
+import { freeOnlyEnabled } from "@/server/free-only";
 
 export const SESSION_COOKIE = "tempocove_session";
 const SESSION_SECONDS = 60 * 60 * 24 * 14;
@@ -172,10 +173,11 @@ export function assertProductionRuntimeSecurity() {
   if (process.env.OUTBOX_WORKER_MODE !== "dedicated") throw new Error("Production requires a dedicated outbox worker.");
   if (databaseRole === "app" && (process.env.TRUST_PROXY !== "true" || Buffer.byteLength(process.env.PROXY_SHARED_SECRET || "") < 32)) throw new Error("Production requires authenticated trusted-proxy ingress with a strong PROXY_SHARED_SECRET.");
   if (databaseRole === "app" && Buffer.byteLength(process.env.OPERATOR_HEALTH_SECRET || "") < 32) throw new Error("Production requires a strong OPERATOR_HEALTH_SECRET.");
-  if (process.env.DEMO_MODE === "true" || process.env.PAYMENTS_PROVIDER !== "stripe" || process.env.CALENDAR_PROVIDER !== "google") throw new Error("Production forbids demo/local provider fallbacks.");
+  if (process.env.DEMO_MODE === "true" || (!freeOnlyEnabled() && process.env.PAYMENTS_PROVIDER !== "stripe") || process.env.CALENDAR_PROVIDER !== "google") throw new Error("Production forbids demo/local provider fallbacks.");
   if (!process.env.GOOGLE_CLIENT_ID?.endsWith(".apps.googleusercontent.com") || Buffer.byteLength(process.env.GOOGLE_CLIENT_SECRET || "") < 16) throw new Error("Production Google OAuth configuration is incomplete.");
-  if (!process.env.STRIPE_SECRET_KEY?.startsWith("sk_test_") || (databaseRole === "app" && !process.env.STRIPE_WEBHOOK_SECRET?.startsWith("whsec_"))) throw new Error("Production payment provider configuration is incomplete or not test-isolated.");
+  if (!freeOnlyEnabled() && (!process.env.STRIPE_SECRET_KEY?.startsWith("sk_test_") || (databaseRole === "app" && !process.env.STRIPE_WEBHOOK_SECRET?.startsWith("whsec_")))) throw new Error("Production payment provider configuration is incomplete or not test-isolated.");
   if (process.env.EMAIL_PROVIDER !== "smtp" || !["implicit","starttls"].includes(process.env.SMTP_TLS_MODE || "") || ["EMAIL_TOKEN_SECRET","SMTP_HOST","SMTP_PORT","SMTP_USER","SMTP_PASSWORD","EMAIL_FROM","EMAIL_REPLY_TO","EMAIL_SENDER_DOMAIN"].some((name) => !process.env[name])) throw new Error("Production requires complete TLS SMTP, system sender identity, and EMAIL_TOKEN_SECRET configuration.");
+  if (process.env.BLOCKWISE_WEBHOOK_URL && (Buffer.byteLength(process.env.BLOCKWISE_WEBHOOK_SECRET || "") < 32 || !/^https:\/\//.test(process.env.BLOCKWISE_WEBHOOK_URL))) throw new Error("Production Blockwise webhook delivery requires an HTTPS URL and strong signing secret.");
   systemEmailIdentity();
   if (Buffer.byteLength(process.env.EMAIL_TOKEN_SECRET || "") < 32) throw new Error("Production requires EMAIL_TOKEN_SECRET with at least 32 bytes.");
 }

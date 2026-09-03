@@ -31,6 +31,7 @@ const replacements = new Map([
   ["replace-with-at-least-32-random-characters", randomBytes(32).toString("base64url")],
   ["replace-with-an-independent-32-byte-random-value", randomBytes(32).toString("base64url")],
   ["replace-with-64-random-hex-characters", randomBytes(32).toString("hex")],
+  ["BLOCKWISE_WEBHOOK_SECRET=\"\"", `BLOCKWISE_WEBHOOK_SECRET="${randomBytes(32).toString("base64url")}"`],
   ["replace-with-a-strong-demo-password", password],
   ["owner@example.com", email],
 ]);

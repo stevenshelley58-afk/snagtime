@@ -3,6 +3,7 @@ import { runWithDatabaseContext } from "@/server/db-context";
 import { apiError, ok } from "@/server/http";
 import { googleCalendarStatus } from "@/server/services/calendar";
 import { stripeTestConfigurationReady } from "@/server/stripe-credentials";
+import { freeOnlyEnabled } from "@/server/services/payments";
 
 export async function GET(request: Request) {
   try {
@@ -16,7 +17,8 @@ export async function GET(request: Request) {
       action: "workspace_read",
     }, async () => ok({
       google: await googleCalendarStatus(access.user.id, access.workspaceId),
-      stripe: { configured: stripeTestConfigurationReady(), mode: "test" as const },
+      freeOnly: freeOnlyEnabled(),
+      stripe: { configured: !freeOnlyEnabled() && stripeTestConfigurationReady(), mode: "test" as const },
       outboxWorker: { enabled: process.env.OUTBOX_WORKER_ENABLED !== "false", activation: "next-node-instrumentation" as const, productionScheduler: "deferred" as const },
     }));
   } catch (error) { return apiError(error); }

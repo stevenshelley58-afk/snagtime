@@ -2,7 +2,7 @@ import type { CreateEventTypeInput, UpdateEventTypeInput } from "@/lib/contracts
 import { db } from "@/server/db";
 import { conflict, notFound } from "@/server/errors";
 import { mapEventType } from "@/server/mappers";
-import { assertPaidBookingsConfigured } from "@/server/services/payments";
+import { assertPaidBookingsConfigured, assertFreeOnlyPrice } from "@/server/services/payments";
 import { googleCalendarReady } from "@/server/services/calendar";
 import { enterDatabaseAction, enterPublicDatabaseContext } from "@/server/db-context";
 
@@ -57,6 +57,7 @@ export async function createEventType(workspaceId: string, ownerId: string, inpu
     label: item.label, durationMinutes: item.durationMinutes, isDefault: item.isDefault,
     priceCents: item.priceCents, currency: item.currency, position: item.position,
   }));
+  durations.forEach((duration) => assertFreeOnlyPrice(duration.priceCents));
   if (input.isActive && durations.some((item) => item.priceCents > 0)) assertPaidBookingsConfigured();
   await assertLocationReady(workspaceId, ownerId, input.locationType, input.isActive);
   const { durations: ignoredDurations, questions, ...eventData } = input;
@@ -75,6 +76,7 @@ export async function updateEventType(workspaceId: string, _actingUserId: string
   if (!current) throw notFound("Event type");
   if (input.slug && input.slug !== current.slug && await db.eventType.findUnique({ where: { slug: input.slug } })) throw conflict("That booking link is already in use.");
   const candidateDurations = input.durations ?? current.durations;
+  candidateDurations.forEach((duration) => assertFreeOnlyPrice(duration.priceCents));
   if ((input.isActive ?? current.isActive) && candidateDurations.some((item) => item.priceCents > 0)) assertPaidBookingsConfigured();
   await assertLocationReady(workspaceId, current.ownerId, input.locationType ?? current.locationType, input.isActive ?? current.isActive, readiness);
   const { durations, questions, ...eventData } = input;

@@ -7,7 +7,9 @@ RUN npm ci --ignore-scripts
 
 FROM deps AS builder
 ARG BUILD_ID
+ARG NEXT_PUBLIC_FREE_ONLY=false
 ENV BUILD_ID=${BUILD_ID}
+ENV NEXT_PUBLIC_FREE_ONLY=${NEXT_PUBLIC_FREE_ONLY}
 COPY . .
 RUN node -e "if(!/^[a-f0-9]{40,64}$/i.test(process.env.BUILD_ID||''))throw new Error('required immutable BUILD_ID build argument missing or invalid')" \
  && npm run db:generate && npm run db:generate:postgres && npm run worker:build && npm run build
@@ -37,6 +39,7 @@ CMD ["node","apps/web/server.js"]
 FROM postgres:18.6-bookworm@sha256:7d2695c3aa88e792e8b3b233e7e4adb296a20412c6c0ca361e3edaaacfada108 AS migration
 WORKDIR /migrations
 COPY --chown=postgres:postgres prisma/postgresql/migrations/202608220100_production_baseline/migration.sql ./migration.sql
+COPY --chown=postgres:postgres prisma/postgresql/migrations/202609030001_blockwise_events/migration.sql ./blockwise-events.sql
 COPY --chown=postgres:postgres scripts/migration-entrypoint.sh ./migration-entrypoint.sh
 USER postgres
 ENTRYPOINT ["/bin/sh","/migrations/migration-entrypoint.sh"]

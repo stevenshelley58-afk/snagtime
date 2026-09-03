@@ -84,6 +84,9 @@ Copying the repository gives you all of the software. External integrations stil
 
 See [Integration setup](docs/INTEGRATION-SETUP.md) for exact callback URLs, environment variables, and verification steps.
 
+For the Blockwise free-only deployment mode and signed booking lifecycle
+events, see [Blockwise integration](docs/BLOCKWISE-INTEGRATION.md).
+
 ## Put it on the internet
 
 SnagTime is a dynamic application, not a static website. It needs server-side Node.js execution, a persistent database, webhook endpoints, and a continuously running background worker.
