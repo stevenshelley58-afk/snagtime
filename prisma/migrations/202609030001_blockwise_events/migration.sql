@@ -1,5 +1,4 @@
 ALTER TABLE "Booking" ADD COLUMN "blockwiseReference" TEXT;
-ALTER TABLE "Booking" ADD COLUMN "completedAt" DATETIME;
 ALTER TABLE "IntegrationOutbox" ADD COLUMN "eventId" TEXT;
 ALTER TABLE "IntegrationOutbox" ADD COLUMN "payloadJson" TEXT;
 ALTER TABLE "IntegrationOutbox" ADD COLUMN "destinationUrl" TEXT;

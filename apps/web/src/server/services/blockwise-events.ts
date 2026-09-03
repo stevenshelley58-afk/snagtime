@@ -28,7 +28,9 @@ function webhookSecret() {
 }
 
 export function blockwiseWebhookConfigured() {
-  return Boolean(process.env.BLOCKWISE_WEBHOOK_URL?.startsWith("https://") && Buffer.byteLength(process.env.BLOCKWISE_WEBHOOK_SECRET || "") >= 32);
+  let destination: URL;
+  try { destination = new URL(process.env.BLOCKWISE_WEBHOOK_URL || ""); } catch { return false; }
+  return destination.protocol === "https:" && Boolean(destination.hostname) && Buffer.byteLength(process.env.BLOCKWISE_WEBHOOK_SECRET || "") >= 32;
 }
 
 export function signBlockwisePayload(rawBody: string, timestamp: number | string, secret = webhookSecret()) {
@@ -45,7 +47,6 @@ export function verifyBlockwiseSignature(rawBody: string, timestamp: string, sup
 }
 
 export function buildBlockwiseBookingEvent(booking: BookingEventSnapshot, kind: BlockwiseBookingLifecycle, id = randomUUID(), occurredAt = new Date()) {
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
   const event: BlockwiseBookingEvent = {
     spec: BLOCKWISE_BOOKING_SPEC,
     id,

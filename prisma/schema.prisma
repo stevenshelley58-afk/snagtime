@@ -238,7 +238,6 @@ model Booking {
   refundedAmountCents     Int       @default(0)
   refundFailureCode       String?
   cancellationReason      String?
-  completedAt             DateTime?
   eventTitleSnapshot      String    @default("")
   locationTypeSnapshot    String    @default("CUSTOM")
   locationValueSnapshot   String?
@@ -401,7 +400,6 @@ model EmailOutbox {
   leaseToken              String?
   leaseExpiresAt          DateTime?
   lastErrorCode           String?
-  completedAt             DateTime?
   createdAt               DateTime  @default(now())
   updatedAt               DateTime  @updatedAt
   workspace               Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)

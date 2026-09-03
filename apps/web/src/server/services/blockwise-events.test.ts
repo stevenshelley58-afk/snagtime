@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { BLOCKWISE_BOOKING_SPEC, blockwiseWebhookConfigured, buildBlockwiseBookingEvent, signBlockwisePayload, verifyBlockwiseSignature } from "@/server/services/blockwise-events";
 import { assertFreeOnlyPrice, freeOnlyEnabled } from "@/server/free-only";
+import { blockwiseDeliveryRequest } from "@/server/services/blockwise-delivery";
 
 const secret = "blockwise-test-secret-with-at-least-32-bytes";
 const booking = {
@@ -28,6 +29,17 @@ describe("Blockwise booking event contract", () => {
     expect(verifyBlockwiseSignature(raw, String(timestamp), signature, secret)).toBe(true);
     expect(verifyBlockwiseSignature(`${raw} `, String(timestamp), signature, secret)).toBe(false);
     expect(verifyBlockwiseSignature(raw, String(timestamp - 301), signature, secret, Date.now())).toBe(false);
+  });
+
+  it("keeps the exact body, event ID, and signed wire headers stable across retries", () => {
+    vi.stubEnv("BLOCKWISE_WEBHOOK_SECRET", secret);
+    const body = JSON.stringify(buildBlockwiseBookingEvent(booking, "created", "6a2f0a44-2df2-4d63-9d1e-6a30ec5f51f0"));
+    const first = blockwiseDeliveryRequest(body, "6a2f0a44-2df2-4d63-9d1e-6a30ec5f51f0", 1770000000);
+    const retry = blockwiseDeliveryRequest(body, "6a2f0a44-2df2-4d63-9d1e-6a30ec5f51f0", 1770000000);
+    expect(first).toEqual(retry);
+    expect(first.headers["x-snagtime-signature"]).toMatch(/^sha256=[0-9a-f]{64}$/);
+    expect(first.body).toBe(body);
+    vi.unstubAllEnvs();
   });
 });
 

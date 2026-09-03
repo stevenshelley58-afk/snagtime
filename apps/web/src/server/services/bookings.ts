@@ -126,7 +126,6 @@ export async function createBooking(
 ): Promise<InternalCreateBookingResult> {
   const requestFingerprint = createHash("sha256").update(JSON.stringify({ slug, ...input })).digest("hex");
   const eventType = await withDatabaseTransactionRetry(() => getEventTypeBySlug(slug));
-  if (input.blockwiseReference && !blockwiseWebhookConfigured()) throw new AppError("BLOCKWISE_WEBHOOK_NOT_CONFIGURED", "This Blockwise booking cannot be accepted until its signed webhook is configured.", 503);
   enterPublicBookingDatabaseContext(eventType.id, eventType.workspaceId, idempotencyKey);
   const prior = await withDatabaseTransactionRetry(() => priorResult(slug, idempotencyKey, requestFingerprint));
   if (prior) {
@@ -136,6 +135,7 @@ export async function createBooking(
     }
     return prior;
   }
+  if (input.blockwiseReference && !blockwiseWebhookConfigured()) throw new AppError("BLOCKWISE_WEBHOOK_NOT_CONFIGURED", "This Blockwise booking cannot be accepted until its signed webhook is configured.", 503);
   const duration = input.durationId ? eventType.durations.find((item) => item.id === input.durationId) : eventType.durations.find((item) => item.isDefault);
   if (!duration) throw notFound("Duration option");
   assertFreeOnlyPrice(duration.priceCents);
@@ -228,6 +228,7 @@ export async function cancelBooking(id: string, cancellationReason?: string, wor
   enterDatabaseAction("booking_write");
   const current = await db.booking.findFirst({ where: { id, ...(workspaceId ? { workspaceId } : {}) }, include: bookingInclude });
   if (!current) throw notFound("Booking");
+  if (current.blockwiseReference && !blockwiseWebhookConfigured()) throw new AppError("BLOCKWISE_WEBHOOK_NOT_CONFIGURED", "This Blockwise booking cannot be changed until its signed webhook is configured.", 503);
   if (current.status === "CANCELLED") return mapBooking(current);
   const updated = await db.$transaction(async (tx) => {
     const mutationNow = new Date();
@@ -257,6 +258,7 @@ export async function rescheduleBooking(id: string, startAt: string, calendar: C
   const mutationContext = currentDatabaseContext();
   const booking = await db.booking.findFirst({ where: { id, ...(workspaceId ? { workspaceId } : {}) }, include: { eventType: { include: { durations: true, questions: true } }, host: true } });
   if (!booking || booking.status !== "CONFIRMED") throw notFound("Booking");
+  if (booking.blockwiseReference && !blockwiseWebhookConfigured()) throw new AppError("BLOCKWISE_WEBHOOK_NOT_CONFIGURED", "This Blockwise booking cannot be changed until its signed webhook is configured.", 503);
   if (booking.calendarProviderSnapshot === "provider_recovery_required") throw new AppError("CALENDAR_PROVIDER_RECOVERY_REQUIRED", "Reconcile this upgraded booking's calendar provider before rescheduling.", 503);
   const requestedStart = new Date(startAt);
   if (requestedStart.getTime() === booking.startAt.getTime()) return mapBooking(await db.booking.findUniqueOrThrow({ where: { id }, include: bookingInclude }));

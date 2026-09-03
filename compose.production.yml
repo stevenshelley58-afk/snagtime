@@ -38,6 +38,8 @@ services:
       DATABASE_PROVIDER: postgresql
       DATABASE_URL_FILE: /run/secrets/app_database_url
       DATABASE_ROLE: app
+      FREE_ONLY: ${FREE_ONLY:-false}
+      NEXT_PUBLIC_FREE_ONLY: ${FREE_ONLY:-false}
       AUTH_SECRET_FILE: /run/secrets/auth_secret
       BOOKING_CAPABILITY_KEY_ID: ${BOOKING_CAPABILITY_KEY_ID:?set booking capability key id}
       BOOKING_CAPABILITY_SECRET_FILE: /run/secrets/booking_capability_secret

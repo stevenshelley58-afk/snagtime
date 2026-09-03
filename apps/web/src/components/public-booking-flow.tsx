@@ -10,6 +10,7 @@ import { foregroundForBackground } from "./brand-contrast";
 import { loadBookingWindowSlots } from "./slot-window";
 import { Icon } from "./icons";
 import { ActionButton, BrandMark, Field } from "./ui";
+import { bookingInvitationFromSearch } from "./booking-invitation";
 
 type Step = "schedule" | "details" | "review";
 type SlotDay = { key: string; weekday: string; day: string; month: string; label: string };
@@ -98,6 +99,7 @@ export function PublicBookingFlow({ slug }: { slug: string }) {
   const [availabilityNotice, setAvailabilityNotice] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [invitation] = useState(() => typeof window === "undefined" ? "" : bookingInvitationFromSearch(window.location.search));
   const slotFormatters = useMemo<SlotFormatters>(() => ({
     key: new Intl.DateTimeFormat("en-US", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }),
     day: new Intl.DateTimeFormat("en-US", { timeZone: timezone, weekday: "short", month: "short", day: "numeric", year: "numeric" }),
@@ -180,7 +182,7 @@ export function PublicBookingFlow({ slug }: { slug: string }) {
     setSubmitting(true);
     setError("");
     try {
-      const input: CreateBookingInput = { startAt: selectedSlot.start, inviteeName: name.trim(), inviteeEmail: email.trim(), inviteeTimeZone: timezone, notes: notes.trim(), durationId: duration.id, answers: event.questions.flatMap((question) => question.id ? [{ questionId: question.id, value: answers[question.id] ?? "" }] : []) };
+      const input: CreateBookingInput = { startAt: selectedSlot.start, inviteeName: name.trim(), inviteeEmail: email.trim(), inviteeTimeZone: timezone, notes: notes.trim(), durationId: duration.id, blockwiseReference: invitation || undefined, answers: event.questions.flatMap((question) => question.id ? [{ questionId: question.id, value: answers[question.id] ?? "" }] : []) };
       const attempt = await getBookingAttempt(slug, input);
       const result = await frontendApi.createBooking(slug, input, attempt.key);
       rememberBookingAttempt(slug, result.bookingId);

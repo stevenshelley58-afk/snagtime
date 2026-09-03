@@ -4,7 +4,7 @@ import { CALENDAR_PROVIDER_TIMEOUT_MS, getCalendarService, googleCredentialsRead
 import { retryPendingGoogleDisconnects } from "@/server/services/calendar";
 import { getPaymentService, type PaymentService } from "@/server/services/payments";
 import { freeOnlyEnabled } from "@/server/free-only";
-import { signBlockwisePayload } from "@/server/services/blockwise-events";
+import { blockwiseDeliveryRequest } from "@/server/services/blockwise-delivery";
 
 export const CALENDAR_LEASE_MS = 120_000;
 export const INTEGRATION_MAX_ATTEMPTS = 12;
@@ -80,11 +80,7 @@ export async function processOutbox(workspaceId: string, bookingId?: string, now
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 10_000);
         try {
-          const response = await fetch(destination, { method: "POST", headers: {
-            "content-type": "application/json", "x-snagtime-timestamp": String(timestamp),
-            "x-snagtime-event-id": effect.eventId,
-            "x-snagtime-signature": `sha256=${signBlockwisePayload(effect.payloadJson, timestamp)}`,
-          }, body: effect.payloadJson, signal: controller.signal });
+          const response = await fetch(destination, { ...blockwiseDeliveryRequest(effect.payloadJson, effect.eventId, timestamp), signal: controller.signal });
           if (!response.ok) throw new Error(`BLOCKWISE_WEBHOOK_HTTP_${response.status}`);
         } finally { clearTimeout(timeout); }
       } else if (freeOnlyEnabled() && effect.kind.startsWith("STRIPE_")) {
