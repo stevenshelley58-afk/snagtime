@@ -102,24 +102,35 @@ jobs:
         run: |
           printf '%s' 'postgresql://tempocove_app_login:CI-App-Database-Password-00000000000001@postgres:5432/snagtime_ci?sslmode=verify-full&sslrootcert=/run/secrets/ci-ca&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000' > ci-certs/DATABASE_URL
           printf '%s' 'ci-auth-secret-00000000000000000000000000000001' > ci-certs/AUTH_SECRET
+          printf '%s' 'postgresql://tempocove_worker_login:CI-Worker-Database-Password-0000000001@postgres:5432/snagtime_ci?sslmode=verify-full&sslrootcert=/run/secrets/ci-ca' > ci-certs/WORKER_DATABASE_URL
+          printf '%s' 'postgresql://tempocove_monitor_login:CI-Monitor-Database-Password-000000001@postgres:5432/snagtime_ci?sslmode=verify-full&sslrootcert=/run/secrets/ci-ca' > ci-certs/MONITOR_DATABASE_URL
           printf '%s' 'ci-booking-capability-secret-00000000000000000001' > ci-certs/BOOKING_CAPABILITY_SECRET
+          printf '%s' '{"ci-booking-v1":"ci-booking-capability-secret-00000000000000000001"}' > ci-certs/BOOKING_CAPABILITY_KEYRING
           printf '%s' 'ci-rate-limit-hash-secret-0000000000000001' > ci-certs/RATE_LIMIT_HASH_SECRET
           printf '%s' 'ci-tenant-context-secret-00000000000001' > ci-certs/TENANT_CONTEXT_SECRET
           printf '%s' '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff' > ci-certs/TOKEN_ENCRYPTION_KEY
           printf '%s' 'ci-proxy-shared-secret-000000000000001' > ci-certs/PROXY_SHARED_SECRET
           printf '%s' 'ci-operator-health-secret-00000001' > ci-certs/OPERATOR_HEALTH_SECRET
           printf '%s' 'ci-google-client-secret-000001' > ci-certs/GOOGLE_CLIENT_SECRET
+          printf '%s' 'ci-email-token-secret-0000000000000001' > ci-certs/EMAIL_TOKEN_SECRET
+          printf '%s' 'ci-blockwise-webhook-secret-000000000001' > ci-certs/BLOCKWISE_WEBHOOK_SECRET
           printf '%s' 'sk_test_ci' > ci-certs/STRIPE_SECRET_KEY
           printf '%s' 'whsec_ci' > ci-certs/STRIPE_WEBHOOK_SECRET
           printf '%s' 'ci-smtp-password' > ci-certs/SMTP_PASSWORD
           secret_dir="$GITHUB_WORKSPACE/runtime-secrets"
           mkdir -p "$secret_dir"
           cp ci-certs/ca.crt "$secret_dir/ci-ca"
-          cp ci-certs/DATABASE_URL ci-certs/AUTH_SECRET ci-certs/BOOKING_CAPABILITY_SECRET ci-certs/RATE_LIMIT_HASH_SECRET ci-certs/TENANT_CONTEXT_SECRET ci-certs/TOKEN_ENCRYPTION_KEY ci-certs/PROXY_SHARED_SECRET ci-certs/OPERATOR_HEALTH_SECRET ci-certs/GOOGLE_CLIENT_SECRET ci-certs/STRIPE_SECRET_KEY ci-certs/STRIPE_WEBHOOK_SECRET ci-certs/SMTP_PASSWORD "$secret_dir/"
+          cp ci-certs/DATABASE_URL ci-certs/WORKER_DATABASE_URL ci-certs/MONITOR_DATABASE_URL ci-certs/AUTH_SECRET ci-certs/BOOKING_CAPABILITY_SECRET ci-certs/BOOKING_CAPABILITY_KEYRING ci-certs/RATE_LIMIT_HASH_SECRET ci-certs/TENANT_CONTEXT_SECRET ci-certs/TOKEN_ENCRYPTION_KEY ci-certs/PROXY_SHARED_SECRET ci-certs/OPERATOR_HEALTH_SECRET ci-certs/GOOGLE_CLIENT_SECRET ci-certs/EMAIL_TOKEN_SECRET ci-certs/BLOCKWISE_WEBHOOK_SECRET ci-certs/STRIPE_SECRET_KEY ci-certs/STRIPE_WEBHOOK_SECRET ci-certs/SMTP_PASSWORD "$secret_dir/"
           chown -R 1000:1000 "$secret_dir"
           chmod 700 "$secret_dir"
           chmod 400 "$secret_dir"/*
-          docker run --rm --user 1000:1000 --volume "$secret_dir:/run/secrets:ro" snagtime:${GITHUB_SHA} node -e "require('fs').readFileSync('/run/secrets/DATABASE_URL'); require('fs').readFileSync('/run/secrets/AUTH_SECRET')"
+          docker run --rm --user 1000:1000 --volume "$secret_dir:/run/secrets:ro" \
+            --env DATABASE_URL_FILE=/run/secrets/DATABASE_URL --env WORKER_DATABASE_URL_FILE=/run/secrets/WORKER_DATABASE_URL --env MONITOR_DATABASE_URL_FILE=/run/secrets/MONITOR_DATABASE_URL \
+            --env AUTH_SECRET_FILE=/run/secrets/AUTH_SECRET --env BOOKING_CAPABILITY_SECRET_FILE=/run/secrets/BOOKING_CAPABILITY_SECRET --env BOOKING_CAPABILITY_KEYRING_FILE=/run/secrets/BOOKING_CAPABILITY_KEYRING \
+            --env RATE_LIMIT_HASH_SECRET_FILE=/run/secrets/RATE_LIMIT_HASH_SECRET --env TENANT_CONTEXT_SECRET_FILE=/run/secrets/TENANT_CONTEXT_SECRET --env TOKEN_ENCRYPTION_KEY_FILE=/run/secrets/TOKEN_ENCRYPTION_KEY \
+            --env PROXY_SHARED_SECRET_FILE=/run/secrets/PROXY_SHARED_SECRET --env OPERATOR_HEALTH_SECRET_FILE=/run/secrets/OPERATOR_HEALTH_SECRET --env GOOGLE_CLIENT_SECRET_FILE=/run/secrets/GOOGLE_CLIENT_SECRET \
+            --env EMAIL_TOKEN_SECRET_FILE=/run/secrets/EMAIL_TOKEN_SECRET --env BLOCKWISE_WEBHOOK_SECRET_FILE=/run/secrets/BLOCKWISE_WEBHOOK_SECRET --env STRIPE_SECRET_KEY_FILE=/run/secrets/STRIPE_SECRET_KEY --env STRIPE_WEBHOOK_SECRET_FILE=/run/secrets/STRIPE_WEBHOOK_SECRET --env SMTP_PASSWORD_FILE=/run/secrets/SMTP_PASSWORD \
+            snagtime:${GITHUB_SHA} node -e "const fs=require('fs'); for (const n of ['DATABASE_URL','WORKER_DATABASE_URL','MONITOR_DATABASE_URL','AUTH_SECRET','BOOKING_CAPABILITY_SECRET','BOOKING_CAPABILITY_KEYRING','RATE_LIMIT_HASH_SECRET','TENANT_CONTEXT_SECRET','TOKEN_ENCRYPTION_KEY','PROXY_SHARED_SECRET','OPERATOR_HEALTH_SECRET','GOOGLE_CLIENT_SECRET','EMAIL_TOKEN_SECRET','BLOCKWISE_WEBHOOK_SECRET','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','SMTP_PASSWORD']) { if (!process.env[n] || process.env[n+'_FILE']) throw new Error('secret file contract failed for '+n); fs.accessSync('/run/secrets/'+n) }"
           ! docker run --rm --user 1001:1001 --volume "$secret_dir:/run/secrets:ro" snagtime:${GITHUB_SHA} node -e "require('fs').readFileSync('/run/secrets/DATABASE_URL')"
           cid=$(docker run -d --network "$(docker inspect "$PG_CONTAINER" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}')" -p 3000:3000 \
             --env NODE_ENV=production \
@@ -128,10 +139,12 @@ jobs:
             --env DATABASE_PROVIDER=postgresql \
             --env DATABASE_ROLE=app \
             --env DATABASE_URL_FILE=/run/secrets/DATABASE_URL \
+            --env WORKER_DATABASE_URL_FILE=/run/secrets/WORKER_DATABASE_URL --env MONITOR_DATABASE_URL_FILE=/run/secrets/MONITOR_DATABASE_URL \
             --volume "$GITHUB_WORKSPACE/runtime-secrets:/run/secrets:ro" \
             --env AUTH_SECRET_FILE=/run/secrets/AUTH_SECRET \
             --env BOOKING_CAPABILITY_KEY_ID=ci-booking-v1 \
             --env BOOKING_CAPABILITY_SECRET_FILE=/run/secrets/BOOKING_CAPABILITY_SECRET \
+            --env BOOKING_CAPABILITY_KEYRING_FILE=/run/secrets/BOOKING_CAPABILITY_KEYRING \
             --env RATE_LIMIT_PROVIDER=postgresql \
             --env RATE_LIMIT_HASH_SECRET_FILE=/run/secrets/RATE_LIMIT_HASH_SECRET \
             --env TENANT_CONTEXT_SECRET_FILE=/run/secrets/TENANT_CONTEXT_SECRET \
@@ -140,6 +153,7 @@ jobs:
             --env TRUST_PROXY=true \
             --env PROXY_SHARED_SECRET_FILE=/run/secrets/PROXY_SHARED_SECRET \
             --env OPERATOR_HEALTH_SECRET_FILE=/run/secrets/OPERATOR_HEALTH_SECRET \
+            --env EMAIL_TOKEN_SECRET_FILE=/run/secrets/EMAIL_TOKEN_SECRET --env BLOCKWISE_WEBHOOK_SECRET_FILE=/run/secrets/BLOCKWISE_WEBHOOK_SECRET \
             --env DEMO_MODE=false \
             --env NEXT_PUBLIC_FREE_ONLY=true \
             --env PAYMENTS_PROVIDER=stripe \
