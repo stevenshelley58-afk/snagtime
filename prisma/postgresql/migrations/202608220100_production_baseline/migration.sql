@@ -207,6 +207,7 @@ CREATE TABLE "Booking" (
     "calendarLeaseExpiresAt" TIMESTAMP(3),
     "idempotencyKey" TEXT,
     "requestFingerprint" TEXT,
+    "blockwiseReference" TEXT,
     "capabilityVersion" TEXT NOT NULL DEFAULT '',
     "capabilityKeyId" TEXT NOT NULL DEFAULT 'legacy-auth-v1',
     "manageExpiresAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -279,6 +280,11 @@ CREATE TABLE "IntegrationOutbox" (
     "leaseToken" TEXT,
     "leaseExpiresAt" TIMESTAMP(3),
     "bookingMutationVersion" INTEGER,
+    "eventId" TEXT,
+    "payloadJson" TEXT,
+    "destinationUrl" TEXT,
+    "signingTimestamp" INTEGER,
+    "signingSignature" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -537,6 +543,9 @@ CREATE INDEX "BookingManageSession_bookingId_expiresAt_idx" ON "BookingManageSes
 
 -- CreateIndex
 CREATE UNIQUE INDEX "IntegrationOutbox_idempotencyKey_key" ON "IntegrationOutbox"("idempotencyKey");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "IntegrationOutbox_eventId_key" ON "IntegrationOutbox"("eventId");
 
 -- CreateIndex
 CREATE INDEX "IntegrationOutbox_status_nextAttemptAt_idx" ON "IntegrationOutbox"("status", "nextAttemptAt");
