@@ -46,6 +46,33 @@ The repository provides:
 
 Historical internal identifiers beginning with `tempocove` remain in database roles and generated artifacts for migration compatibility. They are not customer-facing branding.
 
+## Production environment contract (names only)
+
+Inject these names through the orchestrator; this document intentionally contains
+no secret values. The web service uses `DATABASE_URL_FILE` and
+`DATABASE_ROLE=app`; the worker uses `WORKER_DATABASE_URL_FILE` and
+`DATABASE_ROLE=worker`; the migration service uses `DATABASE_URL_FILE` with the
+migration role. All three use `DATABASE_PROVIDER=postgresql`.
+
+Required non-secret runtime settings are `NODE_ENV=production`, `BUILD_ID`,
+`NEXT_PUBLIC_APP_URL`, `FREE_ONLY`, `NEXT_PUBLIC_FREE_ONLY`,
+`CALENDAR_PROVIDER=google`, `GOOGLE_CLIENT_ID`, `EMAIL_PROVIDER=smtp`,
+`SMTP_HOST`, `SMTP_PORT`, `SMTP_TLS_MODE`, `EMAIL_FROM`, `EMAIL_REPLY_TO`,
+`EMAIL_SENDER_DOMAIN`, and `OUTBOX_WORKER_MODE=dedicated`. The app service also
+sets `RATE_LIMIT_PROVIDER=postgresql`, `TRUST_PROXY=true`, and
+`BOOKING_CAPABILITY_KEY_ID`.
+
+Mount secret files under `/run/secrets/` for the names referenced by
+`AUTH_SECRET_FILE`, `BOOKING_CAPABILITY_SECRET_FILE`,
+`BOOKING_CAPABILITY_KEYRING_FILE`, `TOKEN_ENCRYPTION_KEY_FILE`,
+`EMAIL_TOKEN_SECRET_FILE`, `TENANT_CONTEXT_SECRET_FILE`,
+`RATE_LIMIT_HASH_SECRET_FILE`, `PROXY_SHARED_SECRET_FILE`,
+`OPERATOR_HEALTH_SECRET_FILE`, `SMTP_PASSWORD_FILE`, and
+`GOOGLE_CLIENT_SECRET_FILE`. When lifecycle delivery is enabled, also mount
+`BLOCKWISE_WEBHOOK_SECRET_FILE` and set `BLOCKWISE_WEBHOOK_URL` to HTTPS.
+Free-only mode must not mount payment-provider secrets; `PAYMENTS_PROVIDER=stub`
+is sufficient.
+
 ## Deployment sequence
 
 ### 1. Prepare a domain and HTTPS ingress
@@ -134,14 +161,25 @@ The runtime refuses to start when its configured `BUILD_ID` does not match the c
 
 ### 5. Run migration, web, and worker
 
-Run the migration image with the migration database URL first. Then run two copies of the runtime image:
+Run the production PostgreSQL migration image with the migration database URL
+first. With the external Docker secrets created, the free-only deployment uses
+this one-shot migration service (the `migration` profile prevents it from
+starting with the long-running services):
+
+```bash
+docker compose --profile migration -f compose.free-only.yml run --rm migration
+```
+
+For a manually managed runtime image, use the repository's PostgreSQL migration
+script with the migration role's PostgreSQL URL. Do not run a SQLite migration
+against a production database. Then run two copies of the runtime image:
 
 - Web command: `node apps/web/server.js`
 - Worker command: `node dist/worker.mjs`
 
 Use `compose.production.yml` to see the required environment split and secret mounts for each service. The file deliberately declares secrets as external, so your orchestration layer must create them before startup.
 
-For a deployment that must never provision or mount payment-provider credentials, use the self-contained `compose.free-only.yml` contract. It sets `FREE_ONLY=true`, uses local calendar and stub payments, and intentionally has no payment-provider secret declarations. Validate it with `docker compose -f compose.free-only.yml config`.
+For a deployment that must never provision or mount payment-provider credentials, use the self-contained `compose.free-only.yml` contract. It sets `FREE_ONLY=true`, uses the real Google Calendar provider (Google client ID plus the mounted `google_client_secret` are still required), and stub payments. It intentionally has no payment-provider secret declarations. Validate it with `docker compose -f compose.free-only.yml config`.
 
 ### 6. Configure providers
 
@@ -192,6 +230,11 @@ pwsh -NoProfile -File scripts/restore-postgres.ps1 `
   -ExpectedSha256 "<recorded SHA-256>" `
   -ConfirmIsolatedEmptyTarget
 ```
+
+The restore script queries the target before writing and rejects any existing
+user tables. `-AllowNonEmptyTarget` is an exceptional, verified override and
+must be accompanied by `-NonEmptyTargetOverrideReason "<ticket and approval>"`;
+use it only when the target has been reviewed and writers are stopped.
 
 The scripts fail closed when TLS or encryption inputs are missing. Keep backup
 artifacts outside the repository and remove temporary restore databases after

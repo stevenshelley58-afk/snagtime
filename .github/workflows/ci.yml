@@ -41,9 +41,12 @@ jobs:
           EMAIL_FROM: ci@example.invalid
           EMAIL_REPLY_TO: ci@example.invalid
           EMAIL_SENDER_DOMAIN: example.invalid
+          GOOGLE_CLIENT_ID: ci-free-only.apps.googleusercontent.com
         run: |
           rendered="$(docker compose -f compose.free-only.yml config)"
           ! printf '%s' "$rendered" | grep -Eiq 'stripe|payment.*secret|secret.*payment'
+      - name: Validate free-only production startup and readiness contract
+        run: npm run ci:free-only-runtime
   history-secret-scan:
     runs-on: ubuntu-24.04
     steps:
