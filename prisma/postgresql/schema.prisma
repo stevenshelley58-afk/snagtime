@@ -52,7 +52,6 @@ model Workspace {
   outboxEffects         IntegrationOutbox[]
   occupancies           BookingOccupancy[]
   emailOutbox           EmailOutbox[]
-  blockwiseBookingActions BlockwiseBookingAction[]
   localInboxMessages    LocalInboxMessage[]
   accountActionTokens   AccountActionToken[]
   bookingRecoveryTokens BookingRecoveryToken[]
@@ -555,7 +554,6 @@ model BlockwiseBookingAction {
   expiresAt          DateTime
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
-  workspace          Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   booking            Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId, createdAt])

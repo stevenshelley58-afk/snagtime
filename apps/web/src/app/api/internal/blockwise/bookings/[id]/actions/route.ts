@@ -1,7 +1,7 @@
 import { apiError, readBoundedText } from "@/server/http";
 import { AppError } from "@/server/errors";
 import { clientAddress, enforceRateLimit } from "@/server/rate-limit";
-import { executeBlockwiseBookingAction, blockwiseActionHeaders, BLOCKWISE_ACTION_MAX_BODY_BYTES, loadBlockwiseBookingActionSecret, parseBlockwiseBookingAction, verifyBlockwiseBookingActionSignature } from "@/server/services/blockwise-booking-actions";
+import { executeBlockwiseBookingAction, getBlockwiseBookingActionReceipt, blockwiseActionHeaders, BLOCKWISE_ACTION_MAX_BODY_BYTES, loadBlockwiseBookingActionSecret, parseBlockwiseBookingAction, verifyBlockwiseBookingActionSignature } from "@/server/services/blockwise-booking-actions";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -27,5 +27,17 @@ export async function POST(request: Request, context: Context) {
     response.headers.set("Cache-Control", "no-store");
     response.headers.set("Referrer-Policy", "no-referrer");
     return response;
+  } catch (error) { return apiError(error); }
+}
+
+export async function GET(request: Request, context: Context) {
+  try {
+    const { id } = await context.params; const headers = blockwiseActionHeaders(request); const secret = loadBlockwiseBookingActionSecret();
+    const rawBody = "";
+    if (!verifyBlockwiseBookingActionSignature({ rawBody, method: request.method, path: new URL(request.url).pathname, headers, secret })) throw new AppError("INVALID_ACTION_SIGNATURE", "Action authentication failed.", 401);
+    if (!headers.workspaceId) throw new AppError("TENANT_BINDING_REQUIRED", "Action tenant binding is invalid.", 403);
+    const actionId = new URL(request.url).searchParams.get("actionId"); if (!actionId) throw new AppError("INVALID_ACTION", "actionId is required.", 400);
+    const result = await getBlockwiseBookingActionReceipt(headers.workspaceId, id, actionId); if (!result) throw new AppError("ACTION_IN_PROGRESS", "Action receipt is still processing.", 409);
+    return Response.json({ data: result }, { headers: { "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
   } catch (error) { return apiError(error); }
 }

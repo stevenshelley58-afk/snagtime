@@ -3,6 +3,9 @@ import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
 const generated = ["prisma/postgresql/schema.prisma"];
+const baseline = "prisma/postgresql/migrations/202608220100_production_baseline/migration.sql";
+const immutableBaselineSha = "9322e90e8732cab1ea1a786dd30d3fd974616655";
+if (createHash("sha1").update(readFileSync(baseline)).digest("hex") !== immutableBaselineSha) throw new Error("Immutable PostgreSQL baseline was edited.");
 const digest = () => createHash("sha256").update(generated.map((path) => `${path}\0${readFileSync(path, "utf8")}\n`).join(""), "utf8").digest("hex");
 const before = digest();
 for (const script of ["scripts/generate-postgres-schema.mjs"]) {

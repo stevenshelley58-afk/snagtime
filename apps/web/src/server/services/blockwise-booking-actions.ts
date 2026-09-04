@@ -33,7 +33,7 @@ export type BlockwiseBookingActionEnvelope = {
   payload: { scheduledStartAt: string; scheduledEndAt?: string } | Record<string, never>;
 };
 export type BlockwiseBookingActionResult = {
-  receiptId: string; actionId: string; idempotencyKey: string; status: "ACCEPTED"; calendarStatus: "PENDING" | "SYNCED" | "FAILED";
+  receiptId: string; actionId: string; idempotencyKey: string; status: "ACCEPTED"; calendarStatus: "PENDING" | "SYNCED" | "LOCAL" | "FAILED" | "SUPERSEDED";
   bookingId: string; workspaceId: string; bookingStatus: string; mutationVersion: number; startAt: string; endAt: string;
 };
 type ActionHeaders = { timestamp: string | null; nonce: string | null; scope: string | null; signature: string | null; workspaceId: string | null };
@@ -139,7 +139,12 @@ function safeResult(receiptId: string, action: BlockwiseBookingActionEnvelope, b
 function parseResult(value: string | null): BlockwiseBookingActionResult | null { if (!value) return null; try { const parsed = JSON.parse(value) as BlockwiseBookingActionResult; return parsed?.status === "ACCEPTED" ? parsed : null; } catch { return null; } }
 async function refreshCalendarReceipt(receipt: { id: string; bookingId: string; expectedVersion: number; action: string }, result: BlockwiseBookingActionResult) {
   const effect = await db.integrationOutbox.findFirst({ where: { bookingId: receipt.bookingId, bookingMutationVersion: receipt.expectedVersion + 1, kind: receipt.action === "booking_cancel" ? "CALENDAR_DELETE" : "CALENDAR_UPDATE" }, orderBy: { createdAt: "desc" } });
-  const calendarStatus = effect?.status === "COMPLETED" && !effect.lastErrorCode ? "SYNCED" : effect?.status === "DEAD" ? "FAILED" : "PENDING";
+  const booking = await db.booking.findUnique({ where: { id: receipt.bookingId }, select: { calendarSyncStatus: true } });
+  const calendarStatus = !effect || ["PENDING", "RETRY", "PROCESSING"].includes(effect.status) ? "PENDING"
+    : effect.status === "DEAD" ? "FAILED"
+      : effect.status === "COMPLETED" && ["STALE_CALENDAR_UPDATE", "SUPERSEDED_BY_RECOVERY_DELETE"].includes(effect.lastErrorCode || "") ? "SUPERSEDED"
+        : effect.status === "COMPLETED" && !effect.lastErrorCode && booking?.calendarSyncStatus === "SYNCED" ? "SYNCED"
+          : effect.status === "COMPLETED" && !effect.lastErrorCode && booking?.calendarSyncStatus === "LOCAL" ? "LOCAL" : "FAILED";
   if (calendarStatus === result.calendarStatus) return result;
   const updated = { ...result, calendarStatus };
   await db.blockwiseBookingAction.updateMany({ where: { id: receipt.id }, data: { resultJson: JSON.stringify(updated) } });
@@ -229,6 +234,15 @@ export async function executeBlockwiseBookingAction(action: BlockwiseBookingActi
     if (error instanceof AppError) throw error;
     throw new AppError("ACTION_QUARANTINED", "Action requires operator reconciliation before retrying.", 503);
   }
+}
+
+/** Read-only signed status polling; never re-executes the booking mutation. */
+export async function getBlockwiseBookingActionReceipt(tenantId: string, bookingId: string, actionId: string) {
+  enterProviderDatabaseContext(bookingId, tenantId, "blockwise_booking_action");
+  const receipt = await db.blockwiseBookingAction.findFirst({ where: { actionId, bookingId, workspaceId: tenantId } });
+  if (!receipt) throw new AppError("ACTION_NOT_FOUND", "Action receipt is unavailable.", 404);
+  const result = parseResult(receipt.resultJson);
+  return result ? refreshCalendarReceipt(receipt, result) : null;
 }
 
 export function loadBlockwiseBookingActionSecret() { return secretFromFile(); }
