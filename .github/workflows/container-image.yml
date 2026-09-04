@@ -35,6 +35,40 @@ jobs:
       - name: Check out exact revision
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
+      - name: Prepare TLS PostgreSQL and production schema
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+          PG_PORT: ${{ job.services.postgres.ports[5432] }}
+          PG_PASSWORD: ci-only-ephemeral
+          DATABASE_URL: postgresql://postgres:ci-only-ephemeral@127.0.0.1:${{ job.services.postgres.ports[5432] }}/snagtime_ci?sslmode=verify-full&sslrootcert=${{ github.workspace }}/ci-certs/ca.crt&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000
+          WORKER_DATABASE_URL: postgresql://tempocove_worker_login:ci-worker-db-password-0000000000000001@127.0.0.1:${{ job.services.postgres.ports[5432] }}/snagtime_ci?sslmode=verify-full&sslrootcert=${{ github.workspace }}/ci-certs/ca.crt&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000
+          TENANT_CONTEXT_SECRET: ci-tenant-context-secret-00000000000001
+          TEMPOCOVE_APP_DB_PASSWORD: ci-app-db-password-000000000000000001
+          TEMPOCOVE_WORKER_DB_PASSWORD: ci-worker-db-password-0000000000000001
+          TEMPOCOVE_MONITOR_DB_PASSWORD: ci-monitor-db-password-000000000000001
+          TEMPOCOVE_MIGRATION_DB_PASSWORD: ci-migration-db-password-00000000000001
+        run: |
+          set -euo pipefail
+          mkdir -p ci-certs
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -keyout ci-certs/ca.key -out ci-certs/ca.crt -subj '/CN=SnagTime CI CA'
+          openssl req -newkey rsa:2048 -nodes -keyout ci-certs/server.key -out ci-certs/server.csr -subj '/CN=postgres'
+          printf 'subjectAltName=DNS:postgres,DNS:localhost,IP:127.0.0.1\n' > ci-certs/server.ext
+          openssl x509 -req -in ci-certs/server.csr -CA ci-certs/ca.crt -CAkey ci-certs/ca.key -CAcreateserial -out ci-certs/server.crt -days 1 -sha256 -extfile ci-certs/server.ext
+          chmod 600 ci-certs/server.key ci-certs/ca.key
+          docker cp ci-certs/server.crt "$PG_CONTAINER":/var/lib/postgresql/server.crt
+          docker cp ci-certs/server.key "$PG_CONTAINER":/var/lib/postgresql/server.key
+          docker exec "$PG_CONTAINER" chown postgres:postgres /var/lib/postgresql/server.crt /var/lib/postgresql/server.key
+          docker exec "$PG_CONTAINER" chmod 600 /var/lib/postgresql/server.key
+          docker exec "$PG_CONTAINER" psql -U postgres -d snagtime_ci -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET ssl = 'on'; ALTER SYSTEM SET ssl_cert_file = '/var/lib/postgresql/server.crt'; ALTER SYSTEM SET ssl_key_file = '/var/lib/postgresql/server.key';"
+          docker restart "$PG_CONTAINER" >/dev/null
+          for attempt in $(seq 1 20); do docker exec "$PG_CONTAINER" pg_isready -U postgres -d snagtime_ci && break || sleep 1; done
+          npm ci --ignore-scripts
+          npm run db:generate:postgres
+          npx prisma migrate deploy --schema prisma/postgresql/schema.prisma
+          npm run db:provision:postgres-logins
+          node --input-type=module -e "import pg from 'pg'; import fs from 'node:fs'; const c=new pg.Client({connectionString:process.env.WORKER_DATABASE_URL,ssl:{rejectUnauthorized:true,ca:fs.readFileSync('ci-certs/ca.crt','utf8')}}); await c.connect(); await c.query('INSERT INTO \"WorkerHeartbeat\" (\"workerId\",\"lastSeenAt\",\"status\",\"buildId\") VALUES (\$1,clock_timestamp(),\$2,\$3) ON CONFLICT (\"workerId\") DO UPDATE SET \"lastSeenAt\"=EXCLUDED.\"lastSeenAt\",\"status\"=EXCLUDED.\"status\",\"buildId\"=EXCLUDED.\"buildId\"',['ci-worker','IDLE',process.env.GITHUB_SHA]); await c.end();"
+        working-directory: ${{ github.workspace }}
+
       - name: Set up BuildKit
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
 
@@ -55,14 +89,17 @@ jobs:
           docker run --rm --entrypoint node snagtime:${GITHUB_SHA} -e "const fs=require('fs'); for (const f of ['apps/web/server.js','dist/worker.mjs','scripts/container-entrypoint.mjs']) { if (!fs.existsSync('/app/'+f)) throw new Error('missing '+f) }"
 
       - name: Start web runtime and exercise liveness endpoint
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
         run: |
-          cid=$(docker run -d --network host \
+          cid=$(docker run -d --network "$(docker inspect "$PG_CONTAINER" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}')" -p 3000:3000 \
             --env NODE_ENV=production \
             --env BUILD_ID=${GITHUB_SHA} \
             --env NEXT_PUBLIC_APP_URL=https://example.invalid/ \
             --env DATABASE_PROVIDER=postgresql \
             --env DATABASE_ROLE=app \
-            --env DATABASE_URL='postgresql://postgres:ci-only-ephemeral@127.0.0.1:5432/snagtime_ci?sslmode=verify-full&sslrootcert=/run/secrets/ci-ca&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000' \
+            --env DATABASE_URL='postgresql://tempocove_app_login:ci-app-db-password-000000000000000001@postgres:5432/snagtime_ci?sslmode=verify-full&sslrootcert=/run/secrets/ci-ca&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000' \
+            --volume "$GITHUB_WORKSPACE/ci-certs/ca.crt:/run/secrets/ci-ca:ro" \
             --env AUTH_SECRET=ci-auth-secret-00000000000000000000000000000001 \
             --env BOOKING_CAPABILITY_KEY_ID=ci-booking-v1 \
             --env BOOKING_CAPABILITY_SECRET=ci-booking-capability-secret-00000000000000000001 \
