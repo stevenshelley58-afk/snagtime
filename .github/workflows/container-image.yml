@@ -23,6 +23,14 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+    services:
+      postgres:
+        image: postgres:18.6-bookworm@sha256:7d2695c3aa88e792e8b3b233e7e4adb296a20412c6c0ca361e3edaaacfada108
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral
+          POSTGRES_DB: snagtime_ci
+        options: --health-cmd "pg_isready -U postgres -d snagtime_ci" --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
       - name: Check out exact revision
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -48,10 +56,36 @@ jobs:
 
       - name: Start web runtime and exercise liveness endpoint
         run: |
-          # Liveness is intentionally dependency-free. The production readiness
-          # contract is exercised by the existing PostgreSQL CI job; using test
-          # mode here prevents a fake database from weakening that contract.
-          cid=$(docker run -d --network host --env NODE_ENV=test --env BUILD_ID=${GITHUB_SHA} --entrypoint node snagtime:${GITHUB_SHA} apps/web/server.js)
+          cid=$(docker run -d --network host \
+            --env NODE_ENV=production \
+            --env BUILD_ID=${GITHUB_SHA} \
+            --env NEXT_PUBLIC_APP_URL=https://example.invalid/ \
+            --env DATABASE_PROVIDER=postgresql \
+            --env DATABASE_ROLE=app \
+            --env DATABASE_URL='postgresql://postgres:ci-only-ephemeral@127.0.0.1:5432/snagtime_ci?sslmode=verify-full&sslrootcert=/run/secrets/ci-ca&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000' \
+            --env AUTH_SECRET=ci-auth-secret-00000000000000000000000000000001 \
+            --env BOOKING_CAPABILITY_KEY_ID=ci-booking-v1 \
+            --env BOOKING_CAPABILITY_SECRET=ci-booking-capability-secret-00000000000000000001 \
+            --env RATE_LIMIT_PROVIDER=postgresql \
+            --env RATE_LIMIT_HASH_SECRET=ci-rate-limit-hash-secret-0000000000000001 \
+            --env TENANT_CONTEXT_SECRET=ci-tenant-context-secret-00000000000001 \
+            --env TOKEN_ENCRYPTION_KEY=00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff \
+            --env OUTBOX_WORKER_MODE=dedicated \
+            --env TRUST_PROXY=true \
+            --env PROXY_SHARED_SECRET=ci-proxy-shared-secret-000000000000001 \
+            --env OPERATOR_HEALTH_SECRET=ci-operator-health-secret-00000001 \
+            --env DEMO_MODE=false \
+            --env NEXT_PUBLIC_FREE_ONLY=true \
+            --env PAYMENTS_PROVIDER=stripe \
+            --env CALENDAR_PROVIDER=google \
+            --env GOOGLE_CLIENT_ID=ci-proof.apps.googleusercontent.com \
+            --env GOOGLE_CLIENT_SECRET=ci-google-client-secret-000001 \
+            --env EMAIL_PROVIDER=smtp \
+            --env SMTP_TLS_MODE=starttls \
+            --env SMTP_HOST=smtp.invalid --env SMTP_PORT=465 --env SMTP_USER=ci --env SMTP_PASSWORD=ci-smtp-password \
+            --env EMAIL_TOKEN_SECRET=ci-email-token-secret-0000000000000001 \
+            --env EMAIL_FROM=ci@example.invalid --env EMAIL_REPLY_TO=ci@example.invalid --env EMAIL_SENDER_DOMAIN=example.invalid \
+            --entrypoint node snagtime:${GITHUB_SHA} apps/web/server.js)
           trap 'docker logs "$cid" || true; docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
           for attempt in $(seq 1 30); do
             if curl --fail --silent --show-error http://127.0.0.1:3000/api/health/live >/dev/null; then exit 0; fi
