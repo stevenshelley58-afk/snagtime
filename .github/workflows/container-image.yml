@@ -1,0 +1,94 @@
+name: SnagTime container image
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Pull requests only build and scan. Publishing is possible only from the
+# protected repository's main branch and uses the ephemeral GITHUB_TOKEN.
+permissions:
+  contents: read
+
+concurrency:
+  group: snagtime-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  build-test-scan:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Build immutable runtime image with embedded SBOM and provenance
+        run: |
+          docker build \
+            --provenance=mode=max \
+            --sbom=true \
+            --build-arg BUILD_ID=${GITHUB_SHA} \
+            --tag snagtime:${GITHUB_SHA} \
+            --target runtime .
+
+      - name: Verify runtime contract
+        run: |
+          test "$(docker image inspect snagtime:${GITHUB_SHA} --format '{{.Config.User}}')" = '1000:1000'
+          test "$(docker image inspect snagtime:${GITHUB_SHA} --format '{{json .Config.Cmd}}')" = '["node","apps/web/server.js"]'
+          docker run --rm --entrypoint node snagtime:${GITHUB_SHA} -e "const fs=require('fs'); for (const f of ['apps/web/server.js','dist/worker.mjs','scripts/container-entrypoint.mjs']) { if (!fs.existsSync('/app/'+f)) throw new Error('missing '+f) }"
+
+      - name: Start web runtime and exercise liveness endpoint
+        run: |
+          cid=$(docker run -d --network host --env NODE_ENV=production --env BUILD_ID=${GITHUB_SHA} --entrypoint node snagtime:${GITHUB_SHA} apps/web/server.js)
+          trap 'docker logs "$cid" || true; docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:3000/api/health/live >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Scan actionable vulnerabilities
+        env:
+          TRIVY_IMAGE_SHA256: ${{ vars.TRIVY_IMAGE_SHA256 }}
+        run: |
+          test -n "$TRIVY_IMAGE_SHA256" || { echo 'Set repository variable TRIVY_IMAGE_SHA256 to an approved aquasec/trivy image digest.' >&2; exit 1; }
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "aquasec/trivy@sha256:${TRIVY_IMAGE_SHA256}" image --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed snagtime:${GITHUB_SHA}
+
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build-test-scan
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out exact revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Log in to GHCR with ephemeral token
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Build and publish immutable image
+        run: |
+          docker build \
+            --provenance=mode=max \
+            --sbom=true \
+            --build-arg BUILD_ID=${GITHUB_SHA} \
+            --tag "${IMAGE}:${GITHUB_SHA}" \
+            --target runtime .
+          docker push "${IMAGE}:${GITHUB_SHA}"
+          digest=$(docker image inspect "${IMAGE}:${GITHUB_SHA}" --format '{{index .RepoDigests 0}}' | sed 's/.*@//')
+          test "$digest" = sha256:* || { echo 'GHCR did not return an immutable digest' >&2; exit 1; }
+          printf '%s\n' "$IMAGE@$digest" | tee image-reference.txt
+
+      - name: Upload immutable image reference
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: snagtime-image-reference-${{ github.sha }}
+          path: image-reference.txt
+          if-no-files-found: error
