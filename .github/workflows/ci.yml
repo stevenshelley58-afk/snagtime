@@ -27,7 +27,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with: { node-version: 24.15.0, cache: npm }
       - run: npm ci --ignore-scripts
-      - run: npm run db:generate && npm run db:reset && npm run db:seed
+      - run: npm run db:generate && npm run db:generate:postgres && npm run db:reset && npm run db:seed
       - run: npm test -- --run apps/web/src/server/services/payments.test.ts apps/web/src/server/services/bookings.test.ts apps/web/src/server/services/event-types.test.ts apps/web/src/server/services/blockwise-events.test.ts apps/web/src/server/services/outbox.test.ts
       - run: npm run typecheck && npm run build
       - name: Validate free-only compose has no payment secret declarations
