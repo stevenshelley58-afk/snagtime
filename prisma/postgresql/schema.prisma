@@ -252,6 +252,7 @@ model Booking {
   idempotencyKey          String?
   requestFingerprint      String?
   blockwiseReference      String?
+  blockwiseTenantId       String?
   capabilityVersion      String    @default("")
   capabilityKeyId        String    @default("legacy-auth-v1")
   manageExpiresAt        DateTime  @default(now())
@@ -543,6 +544,9 @@ model BlockwiseBookingAction {
   requestFingerprint String
   payloadJson        String
   reason             String
+  operatorId         String
+  operatorRole       String
+  operatorAal        String
   status             String   @default("PROCESSING")
   leaseToken         String?
   leaseExpiresAt     DateTime?

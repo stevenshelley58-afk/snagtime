@@ -10,6 +10,9 @@ CREATE TABLE IF NOT EXISTS "BlockwiseBookingAction" (
   "requestFingerprint" TEXT NOT NULL,
   "payloadJson" TEXT NOT NULL,
   "reason" TEXT NOT NULL,
+  "operatorId" TEXT NOT NULL,
+  "operatorRole" TEXT NOT NULL,
+  "operatorAal" TEXT NOT NULL,
   "status" TEXT NOT NULL DEFAULT 'PROCESSING',
   "leaseToken" TEXT,
   "leaseExpiresAt" TIMESTAMP(3),
@@ -32,6 +35,10 @@ WITH CHECK (tempocove_context_valid('provider') AND current_setting('tempocove.a
 -- The action handler reuses booking mutation code, but its provider context is
 -- deliberately narrower than provider_commit: only the bound booking/tenant
 -- may be read or changed during this request.
+ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "blockwiseTenantId" TEXT;
+CREATE INDEX IF NOT EXISTS "Booking_blockwiseTenantId_idx" ON "Booking"("blockwiseTenantId");
+ALTER TABLE "BlockwiseBookingAction" DROP CONSTRAINT IF EXISTS "BlockwiseBookingAction_workspaceId_fkey";
+
 CREATE OR REPLACE FUNCTION tempocove_blockwise_booking_relation(row_booking text, row_workspace text)
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   SELECT tempocove_context_valid('provider')
@@ -45,21 +52,21 @@ GRANT EXECUTE ON FUNCTION tempocove_blockwise_booking_relation(text,text) TO tem
 
 DROP POLICY IF EXISTS app_workspace_booking_write ON "Booking";
 CREATE POLICY app_workspace_booking_write ON "Booking" FOR UPDATE TO tempocove_app
-USING (tempocove_blockwise_booking_relation(id,"workspaceId") OR (tempocove_workspace_actor("workspaceId","hostId") AND current_setting('tempocove.action',true)='booking_write'))
-WITH CHECK (tempocove_blockwise_booking_relation(id,"workspaceId") OR (tempocove_workspace_actor("workspaceId","hostId") AND current_setting('tempocove.action',true)='booking_write'));
+USING (tempocove_blockwise_booking_relation(id,"blockwiseTenantId") OR (tempocove_workspace_actor("workspaceId","hostId") AND current_setting('tempocove.action',true)='booking_write'))
+WITH CHECK (tempocove_blockwise_booking_relation(id,"blockwiseTenantId") OR (tempocove_workspace_actor("workspaceId","hostId") AND current_setting('tempocove.action',true)='booking_write'));
 DROP POLICY IF EXISTS app_workspace_occupancy_delete ON "BookingOccupancy";
 CREATE POLICY app_workspace_occupancy_delete ON "BookingOccupancy" FOR DELETE TO tempocove_app
-USING (tempocove_blockwise_booking_relation("bookingId","workspaceId") OR (tempocove_workspace_actor("workspaceId","hostId") AND current_setting('tempocove.action',true)='booking_write'));
+USING (tempocove_blockwise_booking_relation("bookingId",(SELECT b."blockwiseTenantId" FROM "Booking" b WHERE b.id="bookingId")) OR (tempocove_workspace_actor("workspaceId","hostId") AND current_setting('tempocove.action',true)='booking_write'));
 DROP POLICY IF EXISTS app_workspace_occupancy_insert ON "BookingOccupancy";
 CREATE POLICY app_workspace_occupancy_insert ON "BookingOccupancy" FOR INSERT TO tempocove_app
-WITH CHECK (tempocove_blockwise_booking_relation("bookingId","workspaceId") OR (tempocove_workspace_actor("workspaceId","hostId") AND current_setting('tempocove.action',true)='booking_write'));
+WITH CHECK (tempocove_blockwise_booking_relation("bookingId",(SELECT b."blockwiseTenantId" FROM "Booking" b WHERE b.id="bookingId") ) OR (tempocove_workspace_actor("workspaceId","hostId") AND current_setting('tempocove.action',true)='booking_write'));
 DROP POLICY IF EXISTS app_workspace_booking_email_insert ON "EmailOutbox";
 CREATE POLICY app_workspace_booking_email_insert ON "EmailOutbox" FOR INSERT TO tempocove_app WITH CHECK (
-  (tempocove_blockwise_booking_relation("bookingId","workspaceId") OR current_setting('tempocove.action',true)='booking_write')
+  (tempocove_blockwise_booking_relation("bookingId",(SELECT b."blockwiseTenantId" FROM "Booking" b WHERE b.id="bookingId") ) OR current_setting('tempocove.action',true)='booking_write')
   AND "bookingId" IS NOT NULL AND status='PENDING' AND "attemptCount"=0 AND "leaseToken" IS NULL
   AND EXISTS (SELECT 1 FROM "Booking" b JOIN "User" h ON h.id=b."hostId" WHERE b.id="bookingId" AND b."workspaceId"="EmailOutbox"."workspaceId" AND lower("recipientEmail") IN (lower(b."inviteeEmail"),lower(h.email))));
 DROP POLICY IF EXISTS app_workspace_booking_outbox_insert ON "IntegrationOutbox";
 CREATE POLICY app_workspace_booking_outbox_insert ON "IntegrationOutbox" FOR INSERT TO tempocove_app WITH CHECK (
-  (tempocove_blockwise_booking_relation("bookingId","workspaceId") OR current_setting('tempocove.action',true)='booking_write')
-  AND (tempocove_blockwise_booking_relation("bookingId","workspaceId") OR tempocove_booking_actor("bookingId"))
+  (tempocove_blockwise_booking_relation("bookingId",(SELECT b."blockwiseTenantId" FROM "Booking" b WHERE b.id="bookingId") ) OR current_setting('tempocove.action',true)='booking_write')
+  AND (tempocove_blockwise_booking_relation("bookingId",(SELECT b."blockwiseTenantId" FROM "Booking" b WHERE b.id="bookingId") ) OR tempocove_booking_actor("bookingId"))
   AND status='PENDING' AND "attemptCount"=0 AND "leaseToken" IS NULL);

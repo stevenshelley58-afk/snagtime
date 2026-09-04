@@ -33,7 +33,7 @@ export type BlockwiseBookingActionEnvelope = {
   payload: { scheduledStartAt: string; scheduledEndAt?: string } | Record<string, never>;
 };
 export type BlockwiseBookingActionResult = {
-  receiptId: string; actionId: string; idempotencyKey: string; status: "SUCCEEDED";
+  receiptId: string; actionId: string; idempotencyKey: string; status: "ACCEPTED";
   bookingId: string; workspaceId: string; bookingStatus: string; mutationVersion: number; startAt: string; endAt: string;
 };
 type ActionHeaders = { timestamp: string | null; nonce: string | null; scope: string | null; signature: string | null; workspaceId: string | null };
@@ -134,9 +134,9 @@ export function blockwiseActionHeaders(request: Request): ActionHeaders {
 }
 
 function safeResult(receiptId: string, action: BlockwiseBookingActionEnvelope, booking: { id: string; workspaceId: string; status: string; mutationVersion: number; startAt: Date; endAt: Date }): BlockwiseBookingActionResult {
-  return { receiptId, actionId: action.actionId, idempotencyKey: action.idempotencyKey, status: "SUCCEEDED", bookingId: booking.id, workspaceId: booking.workspaceId, bookingStatus: booking.status, mutationVersion: booking.mutationVersion, startAt: booking.startAt.toISOString(), endAt: booking.endAt.toISOString() };
+  return { receiptId, actionId: action.actionId, idempotencyKey: action.idempotencyKey, status: "ACCEPTED", bookingId: booking.id, workspaceId: booking.workspaceId, bookingStatus: booking.status, mutationVersion: booking.mutationVersion, startAt: booking.startAt.toISOString(), endAt: booking.endAt.toISOString() };
 }
-function parseResult(value: string | null): BlockwiseBookingActionResult | null { if (!value) return null; try { const parsed = JSON.parse(value) as BlockwiseBookingActionResult; return parsed?.status === "SUCCEEDED" ? parsed : null; } catch { return null; } }
+function parseResult(value: string | null): BlockwiseBookingActionResult | null { if (!value) return null; try { const parsed = JSON.parse(value) as BlockwiseBookingActionResult; return parsed?.status === "ACCEPTED" ? parsed : null; } catch { return null; } }
 function providerCode(error: unknown) {
   if (error && typeof error === "object" && "code" in error && typeof (error as { code?: unknown }).code === "string") return (error as { code: string }).code;
   return "ACTION_EXECUTION_FAILED";
@@ -148,7 +148,7 @@ function actionApplied(action: BlockwiseBookingActionEnvelope, booking: { status
 }
 
 async function reconcileExpiredAction(receipt: { id: string }, action: BlockwiseBookingActionEnvelope, now: Date) {
-  const booking = await db.booking.findFirst({ where: { id: action.target.id, workspaceId: action.workspaceId } });
+  const booking = await db.booking.findFirst({ where: { id: action.target.id, blockwiseTenantId: action.workspaceId } });
   if (booking && actionApplied(action, booking)) {
     const result = safeResult(receipt.id, action, booking);
     const settled = await db.blockwiseBookingAction.updateMany({ where: { id: receipt.id, status: "PROCESSING", leaseExpiresAt: { lte: now } }, data: { status: "SUCCEEDED", resultJson: JSON.stringify(result), leaseToken: null, leaseExpiresAt: null } });
@@ -179,7 +179,7 @@ export async function executeBlockwiseBookingAction(action: BlockwiseBookingActi
     const reconciled = await reconcileExpiredAction(receipt, action, now); if (reconciled) return reconciled;
     throw new AppError("ACTION_QUARANTINED", "Action requires operator reconciliation before retrying.", 503);
   }
-  const booking = await db.booking.findFirst({ where: { id: action.target.id, workspaceId: action.workspaceId } });
+  const booking = await db.booking.findFirst({ where: { id: action.target.id, blockwiseTenantId: action.workspaceId } });
   if (!booking || !booking.blockwiseReference) throw new AppError("BOOKING_NOT_FOUND", "Booking is unavailable.", 404);
   if (booking.mutationVersion !== action.expectedVersion) throw new AppError("STALE_BOOKING_VERSION", "Booking changed; refresh the operator view.", 409);
   if (action.action === "booking_reschedule" && booking.status !== "CONFIRMED") throw new AppError("BOOKING_NOT_ACTIVE", "Booking is not active.", 409);
@@ -190,7 +190,7 @@ export async function executeBlockwiseBookingAction(action: BlockwiseBookingActi
     if (payload.scheduledEndAt && payload.scheduledEndAt !== expectedEnd) throw new AppError("INVALID_ACTION", "Action schedule is invalid.", 400);
   }
   try {
-    receipt = await db.blockwiseBookingAction.create({ data: { actionId: action.actionId, idempotencyKey: action.idempotencyKey, nonce: transportNonce, workspaceId: action.workspaceId, bookingId: action.target.id, action: action.action, expectedVersion: action.expectedVersion, requestFingerprint, payloadJson: JSON.stringify(action.payload), reason: action.reason, status: "PROCESSING", leaseToken, leaseExpiresAt, expiresAt: new Date(action.expiresAt) } });
+    receipt = await db.blockwiseBookingAction.create({ data: { actionId: action.actionId, idempotencyKey: action.idempotencyKey, nonce: transportNonce, workspaceId: action.workspaceId, bookingId: action.target.id, action: action.action, expectedVersion: action.expectedVersion, requestFingerprint, payloadJson: JSON.stringify(action.payload), reason: action.reason, operatorId: action.actor.operatorId, operatorRole: action.actor.role, operatorAal: action.actor.aal, status: "PROCESSING", leaseToken, leaseExpiresAt, expiresAt: new Date(action.expiresAt) } });
   } catch (error) {
     if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
     const winner = await db.blockwiseBookingAction.findUnique({ where: { idempotencyKey: action.idempotencyKey } });
@@ -198,16 +198,19 @@ export async function executeBlockwiseBookingAction(action: BlockwiseBookingActi
     throw new AppError("ACTION_IN_PROGRESS", "Action is already being processed.", 409);
   }
   try {
-    if (action.action === "booking_cancel") await cancelBooking(action.target.id, action.reason, action.workspaceId, action.expectedVersion);
-    else await rescheduleBooking(action.target.id, (action.payload as { scheduledStartAt: string }).scheduledStartAt, undefined, action.workspaceId, action.expectedVersion);
-    const finalBooking = await db.booking.findFirstOrThrow({ where: { id: action.target.id, workspaceId: action.workspaceId } });
+    // The signed workspaceId is Blockwise's external tenant UUID. The
+    // database policy binds it to Booking.blockwiseTenantId; it is not the
+    // internal SnagTime workspace CUID accepted by booking services.
+    if (action.action === "booking_cancel") await cancelBooking(action.target.id, action.reason, undefined, action.expectedVersion);
+    else await rescheduleBooking(action.target.id, (action.payload as { scheduledStartAt: string }).scheduledStartAt, undefined, undefined, action.expectedVersion);
+    const finalBooking = await db.booking.findFirstOrThrow({ where: { id: action.target.id, blockwiseTenantId: action.workspaceId } });
     const resultJson = JSON.stringify(safeResult(receipt.id, action, finalBooking));
     enterDatabaseAction("blockwise_booking_action");
     const settled = await db.blockwiseBookingAction.updateMany({ where: { id: receipt.id, leaseToken }, data: { status: "SUCCEEDED", resultJson, leaseToken: null, leaseExpiresAt: null, errorCode: null } });
     if (settled.count !== 1) throw new AppError("ACTION_QUARANTINED", "Action requires operator reconciliation before retrying.", 503);
     return JSON.parse(resultJson) as BlockwiseBookingActionResult;
   } catch (error) {
-    const finalBooking = await db.booking.findFirst({ where: { id: action.target.id, workspaceId: action.workspaceId } });
+    const finalBooking = await db.booking.findFirst({ where: { id: action.target.id, blockwiseTenantId: action.workspaceId } });
     if (finalBooking && actionApplied(action, finalBooking)) {
       const resultJson = JSON.stringify(safeResult(receipt.id, action, finalBooking));
       enterDatabaseAction("blockwise_booking_action");

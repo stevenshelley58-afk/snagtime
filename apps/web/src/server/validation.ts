@@ -89,6 +89,7 @@ export const bookingInput = z.object({
   durationId: z.string().min(1).max(100).optional(),
   answers: z.array(z.object({ questionId: z.string().min(1).max(100), value: z.unknown() })).max(20).optional(),
   blockwiseReference: z.string().trim().min(1).max(512).optional(),
+  blockwiseCapability: z.string().trim().min(80).max(1200).optional(),
 });
 
 export const demoLoginInput = z.object({ email: z.email().transform((value) => value.toLowerCase()), password: z.string().min(1).max(200) });

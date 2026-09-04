@@ -17,6 +17,7 @@ import { blockwiseSnapshot, enqueueBlockwiseBookingEvent } from "@/server/servic
 import { blockwiseWebhookConfigured } from "@/server/services/blockwise-events";
 import { assertFreeOnlyPrice } from "@/server/free-only";
 import { boundedPrismaTransactionOptions, withDatabaseTransactionRetry } from "@/server/database-retry";
+import { verifyBlockwiseInvitationCapability } from "@/server/services/blockwise-invitation";
 
 const activeStatuses = ["CONFIRMED", "PENDING_PAYMENT"];
 function providerErrorCode(error: unknown) { return typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code || "") : ""; }
@@ -135,6 +136,10 @@ export async function createBooking(
     }
     return prior;
   }
+  if (input.blockwiseReference && !input.blockwiseCapability) throw new AppError("INVALID_BLOCKWISE_CAPABILITY", "A signed Blockwise invitation capability is required.", 403);
+  if (input.blockwiseCapability && !input.blockwiseReference) throw new AppError("INVALID_BLOCKWISE_CAPABILITY", "Blockwise invitation capability must include its reference.", 403);
+  const blockwiseInvitation = input.blockwiseCapability ? verifyBlockwiseInvitationCapability(input.blockwiseCapability) : null;
+  if (input.blockwiseReference && blockwiseInvitation?.reference !== input.blockwiseReference) throw new AppError("INVALID_BLOCKWISE_CAPABILITY", "Blockwise invitation binding is invalid.", 403);
   if (input.blockwiseReference && !blockwiseWebhookConfigured()) throw new AppError("BLOCKWISE_WEBHOOK_NOT_CONFIGURED", "This Blockwise booking cannot be accepted until its signed webhook is configured.", 503);
   const duration = input.durationId ? eventType.durations.find((item) => item.id === input.durationId) : eventType.durations.find((item) => item.isDefault);
   if (!duration) throw notFound("Duration option");
@@ -169,6 +174,7 @@ export async function createBooking(
         bookingWindowDays: eventType.bookingWindowDays,
         inviteeName: input.inviteeName, inviteeEmail: input.inviteeEmail, inviteeTimeZone: input.inviteeTimeZone,
         blockwiseReference: input.blockwiseReference || null,
+        blockwiseTenantId: blockwiseInvitation?.tenantId || null,
         startAt: requestedStart, endAt: requestedEnd, notes: input.notes || null,
         eventTitleSnapshot: eventType.name, locationTypeSnapshot: eventType.locationType,
         locationValueSnapshot: eventType.locationValue, calendarProviderSnapshot,
