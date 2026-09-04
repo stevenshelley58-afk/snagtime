@@ -45,7 +45,13 @@ export function enterProviderDatabaseContext(subject: string, workspaceId?: stri
 export function enterDatabaseAction(action:string, scope?: { workspaceId?: string; userId?: string; sessionHash?: string; subject?: string }){
   const current=databaseContext.getStore();
   if (current) {
-    enterDatabaseContext({ mode: current.mode, workspaceId: scope?.workspaceId || current.workspaceId, userId: scope?.userId || current.userId, sessionHash: scope?.sessionHash ?? current.sessionHash, subject: scope?.subject ?? current.subject, action });
+    // Blockwise actions execute the normal booking mutation service, which
+    // changes its local action label to booking_write. Keep the authenticated
+    // capability action for the whole transaction so RLS never falls back to
+    // the broader workspace policy.
+    const effectiveAction = current.mode === "provider" && current.action === "blockwise_booking_action"
+      ? current.action : action;
+    enterDatabaseContext({ mode: current.mode, workspaceId: scope?.workspaceId || current.workspaceId, userId: scope?.userId || current.userId, sessionHash: scope?.sessionHash ?? current.sessionHash, subject: scope?.subject ?? current.subject, action: effectiveAction });
     return;
   }
   if (scope?.workspaceId && scope?.userId) enterDatabaseContext({ mode: "workspace", workspaceId: scope.workspaceId, userId: scope.userId, sessionHash: scope.sessionHash, subject: scope.subject, action });

@@ -56,6 +56,12 @@ function timestamp(value: unknown, label: string) {
   if (!ISO.test(normalized) || !Number.isFinite(date.getTime()) || date.toISOString() !== normalized) throw new AppError("INVALID_ACTION", `${label} is invalid.`, 400);
   return normalized;
 }
+const ACTION_CLOCK_SKEW_MS = 30_000;
+export function assertActionTimeWindow(action: Pick<BlockwiseBookingActionEnvelope, "createdAt" | "expiresAt">, now: Date) {
+  const created = Date.parse(action.createdAt); const expires = Date.parse(action.expiresAt); const current = now.getTime();
+  if (current + ACTION_CLOCK_SKEW_MS < created || current - ACTION_CLOCK_SKEW_MS > expires)
+    throw new AppError("ACTION_EXPIRED", "Action is outside its authenticated time window.", 409);
+}
 
 /** Parse only the allowlisted Frank action shape. */
 export function parseBlockwiseBookingAction(input: unknown, routeBookingId?: string): BlockwiseBookingActionEnvelope {
@@ -65,8 +71,8 @@ export function parseBlockwiseBookingAction(input: unknown, routeBookingId?: str
   if (value.schema !== BLOCKWISE_ACTION_SCHEMA) throw new AppError("UNSUPPORTED_ACTION_SCHEMA", "Action schema is unsupported.", 400);
   const actionId = uuid(value.actionId, "actionId"); const idempotencyKey = string(value.idempotencyKey, "idempotencyKey", 256);
   if (!IDEMPOTENCY.test(idempotencyKey)) throw new AppError("INVALID_IDEMPOTENCY_KEY", "Idempotency key is invalid.", 400);
-  // SnagTime workspaces are opaque IDs (currently CUIDs); the signed tenant
-  // binding is still exact and must match both customerId and the booking row.
+  // Keep the external tenant binding opaque here; the adapter must resolve it
+  // to SnagTime's internal CUID before executing any database operation.
   const workspaceId = string(value.workspaceId, "workspaceId", 128); const customerId = string(value.customerId, "customerId", 128);
   if (workspaceId !== customerId) throw new AppError("TENANT_BINDING_REQUIRED", "Action tenant binding is invalid.", 403);
   const actorValue = record(value.actor, "actor"); const actor = { operatorId: uuid(actorValue.operatorId, "actor.operatorId"), role: actorValue.role, aal: actorValue.aal } as BlockwiseBookingActionEnvelope["actor"];
@@ -93,6 +99,15 @@ function secretFromFile() {
   const path = process.env.BLOCKWISE_BOOKING_ACTION_SECRET_FILE?.trim() || "";
   if (!path || !isAbsolute(path)) throw new AppError("ACTION_AUTH_UNAVAILABLE", "Booking action authentication is unavailable.", 503);
   try {
+    // Validate every ancestor, not only the leaf: a symlinked or writable
+    // mount parent can replace an otherwise safe-looking secret at runtime.
+    let cursor = resolve(path); const ancestors: string[] = [];
+    while (true) { ancestors.push(cursor); const parent = resolve(cursor, ".."); if (parent === cursor) break; cursor = parent; }
+    for (const ancestor of ancestors) {
+      const parentInfo = lstatSync(ancestor);
+      if (parentInfo.isSymbolicLink() || (!parentInfo.isDirectory() && ancestor !== resolve(path))) throw new Error("invalid secret path ancestor");
+      if (process.platform !== "win32" && ancestor !== resolve(path) && (parentInfo.mode & 0o022) !== 0) throw new Error("secret directory permissions are too broad");
+    }
     const info = lstatSync(path);
     if (!info.isFile() || info.isSymbolicLink() || resolve(path) !== path || info.size > 4096) throw new Error("invalid secret file");
     if (process.platform !== "win32" && (info.mode & 0o077) !== 0) throw new Error("secret file permissions are too broad");
@@ -122,7 +137,10 @@ function safeResult(receiptId: string, action: BlockwiseBookingActionEnvelope, b
   return { receiptId, actionId: action.actionId, idempotencyKey: action.idempotencyKey, status: "SUCCEEDED", bookingId: booking.id, workspaceId: booking.workspaceId, bookingStatus: booking.status, mutationVersion: booking.mutationVersion, startAt: booking.startAt.toISOString(), endAt: booking.endAt.toISOString() };
 }
 function parseResult(value: string | null): BlockwiseBookingActionResult | null { if (!value) return null; try { const parsed = JSON.parse(value) as BlockwiseBookingActionResult; return parsed?.status === "SUCCEEDED" ? parsed : null; } catch { return null; } }
-function providerCode(error: unknown) { return error instanceof AppError ? error.code : "ACTION_EXECUTION_FAILED"; }
+function providerCode(error: unknown) {
+  if (error && typeof error === "object" && "code" in error && typeof (error as { code?: unknown }).code === "string") return (error as { code: string }).code;
+  return "ACTION_EXECUTION_FAILED";
+}
 function actionApplied(action: BlockwiseBookingActionEnvelope, booking: { status: string; mutationVersion: number; startAt: Date }) {
   if (booking.mutationVersion !== action.expectedVersion + 1) return false;
   if (action.action === "booking_cancel") return booking.status === "CANCELLED";
@@ -143,6 +161,7 @@ async function reconcileExpiredAction(receipt: { id: string }, action: Blockwise
 
 /** Reserve, execute, reconcile and settle one private Blockwise booking action. */
 export async function executeBlockwiseBookingAction(action: BlockwiseBookingActionEnvelope, rawBody: string, transportNonce: string, now = new Date()): Promise<BlockwiseBookingActionResult> {
+  assertActionTimeWindow(action, now);
   const requestFingerprint = createHash("sha256").update(rawBody).digest("hex");
   if (!NONCE.test(transportNonce)) throw new AppError("REPLAY_DETECTED", "Action replay was rejected.", 409);
   enterProviderDatabaseContext(action.target.id, action.workspaceId, "blockwise_booking_action");

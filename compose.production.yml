@@ -75,7 +75,8 @@ services:
       EMAIL_SENDER_DOMAIN: ${EMAIL_SENDER_DOMAIN:?set authorized sender domain}
       BLOCKWISE_WEBHOOK_URL: ${BLOCKWISE_WEBHOOK_URL:-}
       BLOCKWISE_WEBHOOK_SECRET_FILE: /run/secrets/blockwise_webhook_secret
-    secrets: [app_database_url,postgres_ca_cert,auth_secret,booking_capability_secret,booking_capability_keyring,token_encryption_key,email_token_secret,tenant_context_secret,rate_limit_hash_secret,proxy_shared_secret,operator_health_secret,google_client_secret,stripe_secret_key,stripe_webhook_secret,blockwise_webhook_secret,smtp_password]
+      BLOCKWISE_BOOKING_ACTION_SECRET_FILE: /run/secrets/blockwise_booking_action_secret
+    secrets: [app_database_url,postgres_ca_cert,auth_secret,booking_capability_secret,booking_capability_keyring,token_encryption_key,email_token_secret,tenant_context_secret,rate_limit_hash_secret,proxy_shared_secret,operator_health_secret,google_client_secret,stripe_secret_key,stripe_webhook_secret,blockwise_webhook_secret,blockwise_booking_action_secret,smtp_password]
     depends_on: { postgres: { condition: service_healthy } }
     read_only: true
     tmpfs: [/tmp]
@@ -146,6 +147,7 @@ secrets:
   stripe_webhook_secret: { external: true }
   smtp_password: { external: true }
   blockwise_webhook_secret: { external: true }
+  blockwise_booking_action_secret: { external: true }
   postgres_server_cert: { external: true }
   postgres_server_key: { external: true }
   postgres_ca_cert: { external: true }

@@ -57,6 +57,7 @@ jobs:
           google_secret=$(random_secret); mask_and_export GOOGLE_CLIENT_SECRET "$google_secret"
           email_secret=$(random_secret); mask_and_export EMAIL_TOKEN_SECRET "$email_secret"
           blockwise_secret=$(random_secret); mask_and_export BLOCKWISE_WEBHOOK_SECRET "$blockwise_secret"
+          action_secret=$(random_secret); mask_and_export BLOCKWISE_BOOKING_ACTION_SECRET "$action_secret"
           stripe_secret="sk_test_$(openssl rand -hex 24)"; mask_and_export STRIPE_SECRET_KEY "$stripe_secret"
           stripe_webhook="whsec_$(openssl rand -hex 24)"; mask_and_export STRIPE_WEBHOOK_SECRET "$stripe_webhook"
           smtp_password=$(random_secret); mask_and_export SMTP_PASSWORD "$smtp_password"
@@ -178,6 +179,7 @@ jobs:
           write_secret GOOGLE_CLIENT_SECRET "$GOOGLE_CLIENT_SECRET"
           write_secret EMAIL_TOKEN_SECRET "$EMAIL_TOKEN_SECRET"
           write_secret BLOCKWISE_WEBHOOK_SECRET "$BLOCKWISE_WEBHOOK_SECRET"
+          write_secret BLOCKWISE_BOOKING_ACTION_SECRET "$BLOCKWISE_BOOKING_ACTION_SECRET"
           write_secret STRIPE_SECRET_KEY "$STRIPE_SECRET_KEY"
           write_secret STRIPE_WEBHOOK_SECRET "$STRIPE_WEBHOOK_SECRET"
           write_secret SMTP_PASSWORD "$SMTP_PASSWORD"
@@ -189,8 +191,8 @@ jobs:
             --env AUTH_SECRET_FILE=/run/secrets/AUTH_SECRET --env BOOKING_CAPABILITY_SECRET_FILE=/run/secrets/BOOKING_CAPABILITY_SECRET --env BOOKING_CAPABILITY_KEYRING_FILE=/run/secrets/BOOKING_CAPABILITY_KEYRING \
             --env RATE_LIMIT_HASH_SECRET_FILE=/run/secrets/RATE_LIMIT_HASH_SECRET --env TENANT_CONTEXT_SECRET_FILE=/run/secrets/TENANT_CONTEXT_SECRET --env TOKEN_ENCRYPTION_KEY_FILE=/run/secrets/TOKEN_ENCRYPTION_KEY \
             --env PROXY_SHARED_SECRET_FILE=/run/secrets/PROXY_SHARED_SECRET --env OPERATOR_HEALTH_SECRET_FILE=/run/secrets/OPERATOR_HEALTH_SECRET --env GOOGLE_CLIENT_SECRET_FILE=/run/secrets/GOOGLE_CLIENT_SECRET \
-            --env EMAIL_TOKEN_SECRET_FILE=/run/secrets/EMAIL_TOKEN_SECRET --env BLOCKWISE_WEBHOOK_SECRET_FILE=/run/secrets/BLOCKWISE_WEBHOOK_SECRET --env STRIPE_SECRET_KEY_FILE=/run/secrets/STRIPE_SECRET_KEY --env STRIPE_WEBHOOK_SECRET_FILE=/run/secrets/STRIPE_WEBHOOK_SECRET --env SMTP_PASSWORD_FILE=/run/secrets/SMTP_PASSWORD \
-            snagtime:${GITHUB_SHA} node -e "const fs=require('fs'); for (const n of ['DATABASE_URL','WORKER_DATABASE_URL','MONITOR_DATABASE_URL','AUTH_SECRET','BOOKING_CAPABILITY_SECRET','BOOKING_CAPABILITY_KEYRING','RATE_LIMIT_HASH_SECRET','TENANT_CONTEXT_SECRET','TOKEN_ENCRYPTION_KEY','PROXY_SHARED_SECRET','OPERATOR_HEALTH_SECRET','GOOGLE_CLIENT_SECRET','EMAIL_TOKEN_SECRET','BLOCKWISE_WEBHOOK_SECRET','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','SMTP_PASSWORD']) { if (!process.env[n] || process.env[n+'_FILE']) throw new Error('secret file contract failed for '+n); fs.accessSync('/run/secrets/'+n) }"
+            --env EMAIL_TOKEN_SECRET_FILE=/run/secrets/EMAIL_TOKEN_SECRET --env BLOCKWISE_WEBHOOK_SECRET_FILE=/run/secrets/BLOCKWISE_WEBHOOK_SECRET --env BLOCKWISE_BOOKING_ACTION_SECRET_FILE=/run/secrets/BLOCKWISE_BOOKING_ACTION_SECRET --env STRIPE_SECRET_KEY_FILE=/run/secrets/STRIPE_SECRET_KEY --env STRIPE_WEBHOOK_SECRET_FILE=/run/secrets/STRIPE_WEBHOOK_SECRET --env SMTP_PASSWORD_FILE=/run/secrets/SMTP_PASSWORD \
+            snagtime:${GITHUB_SHA} node -e "const fs=require('fs'); for (const n of ['DATABASE_URL','WORKER_DATABASE_URL','MONITOR_DATABASE_URL','AUTH_SECRET','BOOKING_CAPABILITY_SECRET','BOOKING_CAPABILITY_KEYRING','RATE_LIMIT_HASH_SECRET','TENANT_CONTEXT_SECRET','TOKEN_ENCRYPTION_KEY','PROXY_SHARED_SECRET','OPERATOR_HEALTH_SECRET','GOOGLE_CLIENT_SECRET','EMAIL_TOKEN_SECRET','BLOCKWISE_WEBHOOK_SECRET','BLOCKWISE_BOOKING_ACTION_SECRET','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','SMTP_PASSWORD']) { if (!process.env[n] || process.env[n+'_FILE']) throw new Error('secret file contract failed for '+n); fs.accessSync('/run/secrets/'+n) }"
           ! docker run --rm --user 1001:1001 --volume "$secret_volume:/run/secrets:ro" snagtime:${GITHUB_SHA} node -e "require('fs').readFileSync('/run/secrets/DATABASE_URL')"
           ! docker run --rm --user 1000:1000 --volume "$secret_volume:/run/secrets:ro" --entrypoint node snagtime:${GITHUB_SHA} -e "require('fs').writeFileSync('/run/secrets/readonly-check','denied')"
           cid=$(docker run -d --network "$network" -p 3000:3000 \
