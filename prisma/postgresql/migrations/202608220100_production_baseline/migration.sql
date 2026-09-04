@@ -283,7 +283,7 @@ CREATE TABLE "IntegrationOutbox" (
     "eventId" TEXT,
     "payloadJson" TEXT,
     "destinationUrl" TEXT,
-    "signingTimestamp" INTEGER,
+    "signingTimestamp" BIGINT,
     "signingSignature" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,

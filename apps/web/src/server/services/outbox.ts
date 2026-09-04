@@ -77,7 +77,7 @@ export async function processOutbox(workspaceId: string, bookingId?: string, now
         const destination = new URL(effect.destinationUrl);
         if (process.env.NODE_ENV === "production" && destination.protocol !== "https:") throw new Error("BLOCKWISE_WEBHOOK_HTTPS_REQUIRED");
         if (effect.signingTimestamp == null || !effect.signingSignature) throw new Error("BLOCKWISE_SIGNING_TIMESTAMP_NOT_CONFIGURED");
-        const timestamp = effect.signingTimestamp;
+        const timestamp = Number(effect.signingTimestamp);
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 10_000);
         try {

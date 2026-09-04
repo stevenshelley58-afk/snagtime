@@ -340,7 +340,7 @@ model IntegrationOutbox {
   eventId         String?   @unique
   payloadJson     String?
   destinationUrl  String?
-  signingTimestamp Int?
+  signingTimestamp BigInt?
   signingSignature String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt

@@ -22,7 +22,7 @@ describe("calendar outbox ownership and lease recovery", () => {
     const occurredAt = new Date("2099-01-01T00:00:00.000Z");
     const eventId = "6a2f0a44-2df2-4d63-9d1e-6a30ec5f51f0";
     const event = buildBlockwiseBookingEvent({ id: bookingId, eventTypeId: eventType.id, workspaceId: eventType.workspaceId, blockwiseReference: "invite-outbox", inviteeName: "Outbox", inviteeEmail: "outbox@example.invalid", startAt: new Date("2099-01-02T00:00:00Z"), endAt: new Date("2099-01-02T00:30:00Z") }, "created", eventId, occurredAt);
-    const payloadJson = JSON.stringify(event); const signingTimestamp = Math.floor(occurredAt.getTime() / 1000); const signingSignature = signBlockwisePayload(payloadJson, signingTimestamp, secret);
+    const payloadJson = JSON.stringify(event); const signingTimestamp = BigInt(Math.floor(occurredAt.getTime() / 1000)); const signingSignature = signBlockwisePayload(payloadJson, signingTimestamp.toString(), secret);
     await db.booking.create({ data: { id: bookingId, workspaceId: eventType.workspaceId, eventTypeId: eventType.id, hostId: eventType.ownerId, durationId: duration.id, durationMinutes: duration.durationMinutes, inviteeName: "Outbox", inviteeEmail: "outbox@example.invalid", inviteeTimeZone: "UTC", startAt: new Date("2099-01-02T00:00:00Z"), endAt: new Date("2099-01-02T00:30:00Z"), status: "CONFIRMED", blockwiseReference: "invite-outbox", capabilityVersion: randomUUID(), manageExpiresAt: new Date("2099-02-01T00:00:00Z"), outboxEffects: { create: { workspaceId: eventType.workspaceId, kind: "BLOCKWISE_BOOKING_EVENT", eventId, payloadJson, destinationUrl: "https://blockwise.example/webhook", signingTimestamp, signingSignature, idempotencyKey: "blockwise:outbox:stable" } } } });
     const calls: Array<{ body: string | null; headers: Headers }> = [];
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => { calls.push({ body: (init?.body as string) ?? null, headers: new Headers(init?.headers) }); return new Response(null, { status: calls.length === 1 ? 503 : 204 }); });
@@ -32,7 +32,7 @@ describe("calendar outbox ownership and lease recovery", () => {
     await processOutbox(eventType.workspaceId, bookingId, new Date("2099-01-01T00:02:00Z"), calendar);
     expect(calls).toHaveLength(2); expect(calls[0]!.body).toBe(payloadJson); expect(calls[1]!.body).toBe(payloadJson);
     expect(calls[0]!.headers.get("x-snagtime-event-id")).toBe(eventId); expect(calls[1]!.headers.get("x-snagtime-event-id")).toBe(eventId);
-    expect(calls[0]!.headers.get("x-snagtime-timestamp")).toBe(String(signingTimestamp)); expect(calls[1]!.headers.get("x-snagtime-timestamp")).toBe(String(signingTimestamp));
+    expect(calls[0]!.headers.get("x-snagtime-timestamp")).toBe(signingTimestamp.toString()); expect(calls[1]!.headers.get("x-snagtime-timestamp")).toBe(signingTimestamp.toString());
     expect(calls[0]!.headers.get("x-snagtime-signature")).toBe(`sha256=${signingSignature}`); expect(calls[1]!.headers.get("x-snagtime-signature")).toBe(`sha256=${signingSignature}`);
     expect(await db.integrationOutbox.findFirstOrThrow({ where: { bookingId } })).toMatchObject({ status: "COMPLETED", attemptCount: 2 });
     fetchMock.mockRestore(); vi.unstubAllEnvs(); await db.booking.delete({ where: { id: bookingId } });

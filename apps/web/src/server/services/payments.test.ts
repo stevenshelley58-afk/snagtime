@@ -83,6 +83,7 @@ describe("payment provider boundary", () => {
       data: { object: { id: sessionId, object: "checkout.session", livemode: false, mode: "payment", status: "complete", client_reference_id: bookingId, payment_status: "paid", payment_intent: { id: `pi_${bookingId}`, latest_charge: `ch_${bookingId}` }, amount_total: 2500, currency: "usd", metadata: { bookingId, eventTypeId: eventType.id, durationId: duration.id } } },
     });
     const signature = Stripe.webhooks.generateTestHeaderString({ payload, secret: "whsec_unit" });
+    vi.stubEnv("BLOCKWISE_WEBHOOK_URL", ""); vi.stubEnv("BLOCKWISE_WEBHOOK_SECRET", "");
     await expect(processStripeWebhook(payload, signature)).rejects.toThrow(/BLOCKWISE_WEBHOOK_NOT_CONFIGURED/);
     expect(await db.booking.findUniqueOrThrow({ where: { id: bookingId } })).toMatchObject({ status: "PENDING_PAYMENT", stripePaymentStatus: "unpaid", stripePaymentIntentId: null });
     vi.stubEnv("BLOCKWISE_WEBHOOK_URL", "https://blockwise.example/webhook"); vi.stubEnv("BLOCKWISE_WEBHOOK_SECRET", "blockwise-payment-test-secret-with-at-least-32-bytes");

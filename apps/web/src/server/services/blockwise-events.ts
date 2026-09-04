@@ -71,8 +71,8 @@ export function buildBlockwiseBookingEvent(booking: BookingEventSnapshot, kind: 
 export async function enqueueBlockwiseBookingEvent(tx: Prisma.TransactionClient, booking: BookingEventSnapshot, kind: BlockwiseBookingLifecycle, occurredAt = new Date()) {
   const event = buildBlockwiseBookingEvent(booking, kind, randomUUID(), occurredAt);
   const payloadJson = JSON.stringify(event);
-  const signingTimestamp = Math.floor(occurredAt.getTime() / 1000);
-  const signingSignature = signBlockwisePayload(payloadJson, signingTimestamp);
+  const signingTimestamp = BigInt(Math.floor(occurredAt.getTime() / 1000));
+  const signingSignature = signBlockwisePayload(payloadJson, signingTimestamp.toString());
   return tx.integrationOutbox.create({ data: {
     workspaceId: booking.workspaceId,
     bookingId: booking.id,
