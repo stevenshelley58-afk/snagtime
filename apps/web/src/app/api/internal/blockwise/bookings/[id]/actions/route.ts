@@ -33,10 +33,14 @@ export async function POST(request: Request, context: Context) {
 export async function GET(request: Request, context: Context) {
   try {
     const { id } = await context.params; const headers = blockwiseActionHeaders(request); const secret = loadBlockwiseBookingActionSecret();
+    const url = new URL(request.url); const keys = [...url.searchParams.keys()];
+    if (keys.length !== 1 || keys[0] !== "actionId" || url.searchParams.getAll("actionId").length !== 1 || !headers.workspaceId) throw new AppError("INVALID_ACTION", "The receipt query is invalid.", 400);
+    const actionId = url.searchParams.get("actionId")!;
     const rawBody = "";
-    if (!verifyBlockwiseBookingActionSignature({ rawBody, method: request.method, path: new URL(request.url).pathname, headers, secret })) throw new AppError("INVALID_ACTION_SIGNATURE", "Action authentication failed.", 401);
-    if (!headers.workspaceId) throw new AppError("TENANT_BINDING_REQUIRED", "Action tenant binding is invalid.", 403);
-    const actionId = new URL(request.url).searchParams.get("actionId"); if (!actionId) throw new AppError("INVALID_ACTION", "actionId is required.", 400);
+    // Bind every immutable lookup identity into the signed target. A changed
+    // query or tenant header therefore cannot turn this into an enumeration.
+    const signedPath = `${url.pathname}?actionId=${encodeURIComponent(actionId)}&workspaceId=${encodeURIComponent(headers.workspaceId)}`;
+    if (!verifyBlockwiseBookingActionSignature({ rawBody, method: request.method, path: signedPath, headers, secret })) throw new AppError("INVALID_ACTION_SIGNATURE", "Action authentication failed.", 401);
     const result = await getBlockwiseBookingActionReceipt(headers.workspaceId, id, actionId); if (!result) throw new AppError("ACTION_IN_PROGRESS", "Action receipt is still processing.", 409);
     return Response.json({ data: result }, { headers: { "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
   } catch (error) { return apiError(error); }
