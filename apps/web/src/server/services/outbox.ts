@@ -76,11 +76,12 @@ export async function processOutbox(workspaceId: string, bookingId?: string, now
         if (!effect.payloadJson || !effect.eventId || !effect.destinationUrl) throw new Error("BLOCKWISE_WEBHOOK_NOT_CONFIGURED");
         const destination = new URL(effect.destinationUrl);
         if (process.env.NODE_ENV === "production" && destination.protocol !== "https:") throw new Error("BLOCKWISE_WEBHOOK_HTTPS_REQUIRED");
-        const timestamp = Math.floor(Date.now() / 1000);
+        if (effect.signingTimestamp == null || !effect.signingSignature) throw new Error("BLOCKWISE_SIGNING_TIMESTAMP_NOT_CONFIGURED");
+        const timestamp = effect.signingTimestamp;
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 10_000);
         try {
-          const response = await fetch(destination, { ...blockwiseDeliveryRequest(effect.payloadJson, effect.eventId, timestamp), signal: controller.signal });
+          const response = await fetch(destination, { ...blockwiseDeliveryRequest(effect.payloadJson, effect.eventId, timestamp, effect.signingSignature), signal: controller.signal });
           if (!response.ok) throw new Error(`BLOCKWISE_WEBHOOK_HTTP_${response.status}`);
         } finally { clearTimeout(timeout); }
       } else if (freeOnlyEnabled() && effect.kind.startsWith("STRIPE_")) {

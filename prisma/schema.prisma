@@ -340,6 +340,8 @@ model IntegrationOutbox {
   eventId         String?   @unique
   payloadJson     String?
   destinationUrl  String?
+  signingTimestamp Int?
+  signingSignature String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   booking        Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)

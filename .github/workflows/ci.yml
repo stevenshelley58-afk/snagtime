@@ -11,6 +11,37 @@ on:
         type: boolean
 permissions: { contents: read }
 jobs:
+  focused-contracts:
+    name: Focused integration contracts
+    runs-on: ubuntu-24.04
+    env:
+      DATABASE_PROVIDER: sqlite
+      DATABASE_URL: file:./dev.db
+      NODE_ENV: test
+      CALENDAR_PROVIDER: local
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: 24.15.0, cache: npm }
+      - run: npm ci --ignore-scripts
+      - run: npm run db:generate && npm run db:reset && npm run db:seed
+      - run: npm test -- --run apps/web/src/server/services/payments.test.ts apps/web/src/server/services/bookings.test.ts apps/web/src/server/services/event-types.test.ts apps/web/src/server/services/blockwise-events.test.ts apps/web/src/server/services/outbox.test.ts
+      - run: npm run typecheck && npm run build
+      - name: Validate free-only compose has no payment secret declarations
+        env:
+          BUILD_ID: ci-build
+          BOOKING_CAPABILITY_KEY_ID: ci-key
+          NEXT_PUBLIC_APP_URL: https://example.invalid
+          SMTP_HOST: smtp.invalid
+          SMTP_PORT: "465"
+          SMTP_TLS_MODE: starttls
+          SMTP_USER: ci
+          EMAIL_FROM: ci@example.invalid
+          EMAIL_REPLY_TO: ci@example.invalid
+          EMAIL_SENDER_DOMAIN: example.invalid
+        run: |
+          rendered="$(docker compose -f compose.free-only.yml config)"
+          ! printf '%s' "$rendered" | grep -Eiq 'stripe|payment.*secret|secret.*payment'
   history-secret-scan:
     runs-on: ubuntu-24.04
     steps:
