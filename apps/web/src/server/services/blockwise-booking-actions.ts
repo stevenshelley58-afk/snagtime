@@ -33,7 +33,7 @@ export type BlockwiseBookingActionEnvelope = {
   payload: { scheduledStartAt: string; scheduledEndAt?: string } | Record<string, never>;
 };
 export type BlockwiseBookingActionResult = {
-  receiptId: string; actionId: string; idempotencyKey: string; status: "ACCEPTED";
+  receiptId: string; actionId: string; idempotencyKey: string; status: "ACCEPTED"; calendarStatus: "PENDING" | "SYNCED" | "FAILED";
   bookingId: string; workspaceId: string; bookingStatus: string; mutationVersion: number; startAt: string; endAt: string;
 };
 type ActionHeaders = { timestamp: string | null; nonce: string | null; scope: string | null; signature: string | null; workspaceId: string | null };
@@ -134,7 +134,7 @@ export function blockwiseActionHeaders(request: Request): ActionHeaders {
 }
 
 function safeResult(receiptId: string, action: BlockwiseBookingActionEnvelope, booking: { id: string; workspaceId: string; status: string; mutationVersion: number; startAt: Date; endAt: Date }): BlockwiseBookingActionResult {
-  return { receiptId, actionId: action.actionId, idempotencyKey: action.idempotencyKey, status: "ACCEPTED", bookingId: booking.id, workspaceId: booking.workspaceId, bookingStatus: booking.status, mutationVersion: booking.mutationVersion, startAt: booking.startAt.toISOString(), endAt: booking.endAt.toISOString() };
+  return { receiptId, actionId: action.actionId, idempotencyKey: action.idempotencyKey, status: "ACCEPTED", calendarStatus: "PENDING", bookingId: booking.id, workspaceId: booking.workspaceId, bookingStatus: booking.status, mutationVersion: booking.mutationVersion, startAt: booking.startAt.toISOString(), endAt: booking.endAt.toISOString() };
 }
 function parseResult(value: string | null): BlockwiseBookingActionResult | null { if (!value) return null; try { const parsed = JSON.parse(value) as BlockwiseBookingActionResult; return parsed?.status === "ACCEPTED" ? parsed : null; } catch { return null; } }
 function providerCode(error: unknown) {

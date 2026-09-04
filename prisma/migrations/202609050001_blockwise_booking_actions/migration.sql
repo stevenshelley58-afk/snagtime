@@ -10,6 +10,9 @@ CREATE TABLE "BlockwiseBookingAction" (
   "requestFingerprint" TEXT NOT NULL,
   "payloadJson" TEXT NOT NULL,
   "reason" TEXT NOT NULL,
+  "operatorId" TEXT NOT NULL,
+  "operatorRole" TEXT NOT NULL,
+  "operatorAal" TEXT NOT NULL,
   "status" TEXT NOT NULL DEFAULT 'PROCESSING',
   "leaseToken" TEXT,
   "leaseExpiresAt" DATETIME,
@@ -27,3 +30,5 @@ CREATE UNIQUE INDEX "BlockwiseBookingAction_nonce_key" ON "BlockwiseBookingActio
 CREATE INDEX "BlockwiseBookingAction_workspaceId_createdAt_idx" ON "BlockwiseBookingAction"("workspaceId", "createdAt");
 CREATE INDEX "BlockwiseBookingAction_bookingId_createdAt_idx" ON "BlockwiseBookingAction"("bookingId", "createdAt");
 CREATE INDEX "BlockwiseBookingAction_status_leaseExpiresAt_idx" ON "BlockwiseBookingAction"("status", "leaseExpiresAt");
+ALTER TABLE "Booking" ADD COLUMN "blockwiseTenantId" TEXT;
+CREATE INDEX "Booking_blockwiseTenantId_idx" ON "Booking"("blockwiseTenantId");

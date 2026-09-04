@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS "BlockwiseBookingAction" (
 CREATE INDEX IF NOT EXISTS "BlockwiseBookingAction_workspaceId_createdAt_idx" ON "BlockwiseBookingAction"("workspaceId", "createdAt");
 CREATE INDEX IF NOT EXISTS "BlockwiseBookingAction_bookingId_createdAt_idx" ON "BlockwiseBookingAction"("bookingId", "createdAt");
 CREATE INDEX IF NOT EXISTS "BlockwiseBookingAction_status_leaseExpiresAt_idx" ON "BlockwiseBookingAction"("status", "leaseExpiresAt");
+GRANT SELECT, INSERT, UPDATE, DELETE ON "BlockwiseBookingAction" TO tempocove_app;
 ALTER TABLE "BlockwiseBookingAction" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "BlockwiseBookingAction" FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS app_provider_blockwise_action ON "BlockwiseBookingAction";
