@@ -407,11 +407,11 @@ GRANT EXECUTE ON FUNCTION tempocove_workspace_access(text),tempocove_workspace_a
 DO $rls$
 DECLARE table_name text;
 BEGIN
-  FOREACH table_name IN ARRAY ARRAY['Workspace','Membership','WorkspaceInvitation','EventType','AvailabilitySchedule','AvailabilityOverride','WorkspaceBranding','Booking','BookingOccupancy','IntegrationOutbox','AccountActionToken','BookingRecoveryToken','EmailOutbox','LocalInboxMessage','AuthSession','OAuthState','OAuthConnection'] LOOP
+  FOREACH table_name IN ARRAY ARRAY['Workspace','Membership','WorkspaceInvitation','EventType','AvailabilitySchedule','AvailabilityOverride','WorkspaceBranding','Booking','BookingOccupancy','IntegrationOutbox','AccountActionToken','BookingRecoveryToken','EmailOutbox','LocalInboxMessage','AuthSession','OAuthState','OAuthConnection','BlockwiseBookingAction'] LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY',table_name);
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY',table_name);
   END LOOP;
-  FOREACH table_name IN ARRAY ARRAY['Workspace','Membership','WorkspaceInvitation','EventType','AvailabilitySchedule','AvailabilityOverride','WorkspaceBranding','Booking','BookingOccupancy','IntegrationOutbox','EmailOutbox','LocalInboxMessage','OAuthConnection'] LOOP
+  FOREACH table_name IN ARRAY ARRAY['Workspace','Membership','WorkspaceInvitation','EventType','AvailabilitySchedule','AvailabilityOverride','WorkspaceBranding','Booking','BookingOccupancy','IntegrationOutbox','EmailOutbox','LocalInboxMessage','OAuthConnection','BlockwiseBookingAction'] LOOP
     EXECUTE format('CREATE POLICY app_workspace_read ON %I FOR SELECT TO tempocove_app USING (tempocove_workspace_access(%I))',table_name,CASE WHEN table_name='Workspace' THEN 'id' ELSE 'workspaceId' END);
   END LOOP;
 END $rls$;
@@ -691,6 +691,9 @@ CREATE POLICY app_provider_email_read ON "EmailOutbox" FOR SELECT TO tempocove_a
 CREATE POLICY app_provider_recovery_update ON "BookingRecoveryToken" FOR UPDATE TO tempocove_app USING (tempocove_context_valid('provider') AND current_setting('tempocove.action',true)='provider_commit' AND "bookingId"=split_part(current_setting('tempocove.subject',true),'|',1)) WITH CHECK ("bookingId"=split_part(current_setting('tempocove.subject',true),'|',1));
 CREATE POLICY app_provider_recovery_insert ON "BookingRecoveryToken" FOR INSERT TO tempocove_app WITH CHECK (tempocove_context_valid('provider') AND current_setting('tempocove.action',true)='provider_commit' AND "bookingId"=split_part(current_setting('tempocove.subject',true),'|',1) AND EXISTS(SELECT 1 FROM "Booking" b WHERE b.id="bookingId" AND b."workspaceId"="BookingRecoveryToken"."workspaceId" AND lower(b."inviteeEmail")=lower(email)));
 CREATE POLICY app_provider_recovery_read ON "BookingRecoveryToken" FOR SELECT TO tempocove_app USING (tempocove_context_valid('provider') AND "bookingId"=split_part(current_setting('tempocove.subject',true),'|',1));
+CREATE POLICY app_provider_blockwise_action ON "BlockwiseBookingAction" FOR ALL TO tempocove_app
+USING (tempocove_context_valid('provider') AND current_setting('tempocove.action',true)='blockwise_booking_action' AND "workspaceId"=current_setting('tempocove.workspace_id',true) AND "bookingId"=split_part(current_setting('tempocove.subject',true),'|',1))
+WITH CHECK (tempocove_context_valid('provider') AND current_setting('tempocove.action',true)='blockwise_booking_action' AND "workspaceId"=current_setting('tempocove.workspace_id',true) AND "bookingId"=split_part(current_setting('tempocove.subject',true),'|',1));
 ALTER TABLE "RateLimitBucket" ENABLE ROW LEVEL SECURITY; ALTER TABLE "RateLimitBucket" FORCE ROW LEVEL SECURITY;
 CREATE TABLE tempocove_rate_policy(limit_value integer NOT NULL,window_ms integer NOT NULL,PRIMARY KEY(limit_value,window_ms));
 INSERT INTO tempocove_rate_policy VALUES (3,3600000),(4,3600000),(5,3600000),(8,3600000),(8,900000),(10,3600000),(10,60000),(12,3600000),(12,900000),(20,3600000),(20,900000),(30,3600000),(30,900000),(30,60000),(120,60000),(240,60000);

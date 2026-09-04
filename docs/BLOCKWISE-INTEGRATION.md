@@ -61,6 +61,50 @@ Rollback is fix-forward: disable `BLOCKWISE_WEBHOOK_URL`, drain or inspect
 pending rows, and deploy the prior application while retaining the additive
 columns. Do not delete outbox rows until Blockwise confirms receipt.
 
+## Private Frank booking operations
+
+Frank may request only the supported customer-account operations through the
+private endpoint `POST /api/internal/blockwise/bookings/<booking-id>/actions`.
+The current allowlist is `booking_cancel` and `booking_reschedule`; booking
+creation remains on the existing public invitation flow because it requires
+slot validation and invitation authority. Every request uses the strict
+`blockwise.ops.action.v1` envelope and is bound to `workspaceId === customerId`
+and the target booking's workspace. `expectedVersion` is the booking's
+optimistic `mutationVersion` (including `0` for a newly created booking).
+
+The exact runtime contract is:
+
+```dotenv
+BLOCKWISE_BOOKING_ACTION_SECRET_FILE=/run/secrets/blockwise_booking_action_secret
+```
+
+The file must be an absolute, regular, non-symlink file containing a printable
+ASCII secret of at least 32 bytes. On Unix, the file may not be group/world
+readable. The secret is not accepted from an environment variable, image,
+request, or database. Frank signs the exact UTF-8 body with
+`HMAC-SHA256(secret, "v1\n<timestamp>\n<nonce>\n<scope>\n<METHOD>\n<path>\n<sha256(body)>")`
+and sends `X-Blockwise-Timestamp`, `X-Blockwise-Nonce`,
+`X-Blockwise-Scope: ops.write`, `X-Blockwise-Signature`, and optionally
+`X-Blockwise-Workspace-Id`. Timestamps are limited to five minutes and a
+nonce can be used only once.
+
+An action reservation is written before SnagTime mutates a booking. The
+reservation stores the request fingerprint, lease, source version, and safe
+result/error code. Repeating the same idempotency key and exact body returns
+the stored redacted result. A lost response after a committed mutation is
+therefore reconciled without repeating Google or payment work. An expired
+lease is marked `QUARANTINED` unless the requested version transition is
+provably present; quarantined actions require operator reconciliation. Error
+responses never include attendee data, provider credentials, raw provider
+payloads, or stack traces.
+
+Rollback is fix-forward: stop Frank action callers, leave reservations and
+outbox rows intact, and deploy the previous image. Existing customer manage
+links and signed `blockwise.booking.v1` lifecycle events remain valid; the
+additive `BlockwiseBookingAction` table can be retained while pending rows are
+audited. Do not delete action receipts or calendar outbox rows as a rollback
+step.
+
 ## Deployment/readiness
 
 Set `BLOCKWISE_WEBHOOK_SECRET` from a runtime secret manager (at least 32

@@ -50,6 +50,7 @@ model Workspace {
   outboxEffects         IntegrationOutbox[]
   occupancies           BookingOccupancy[]
   emailOutbox           EmailOutbox[]
+  blockwiseBookingActions BlockwiseBookingAction[]
   localInboxMessages    LocalInboxMessage[]
   accountActionTokens   AccountActionToken[]
   bookingRecoveryTokens BookingRecoveryToken[]
@@ -265,6 +266,7 @@ model Booking {
   manageSessions          BookingManageSession[]
   recoveryTokens          BookingRecoveryToken[]
   emailOutbox             EmailOutbox[]
+  blockwiseBookingActions BlockwiseBookingAction[]
 
   @@index([workspaceId, startAt, endAt])
   @@index([hostId, startAt, endAt])
@@ -523,4 +525,34 @@ model WorkerHeartbeat {
   buildId    String
 
   @@index([lastSeenAt])
+}
+
+/// Private Blockwise operator action reservation. The row is written before
+/// invoking a booking mutation so a lost response cannot cause a blind retry.
+model BlockwiseBookingAction {
+  id                 String   @id @default(cuid())
+  actionId           String   @unique
+  idempotencyKey     String   @unique
+  nonce              String   @unique
+  workspaceId        String
+  bookingId          String
+  action             String
+  expectedVersion    Int
+  requestFingerprint String
+  payloadJson        String
+  reason             String
+  status             String   @default("PROCESSING")
+  leaseToken         String?
+  leaseExpiresAt     DateTime?
+  resultJson         String?
+  errorCode          String?
+  expiresAt          DateTime
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  workspace          Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  booking            Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([bookingId, createdAt])
+  @@index([status, leaseExpiresAt])
 }

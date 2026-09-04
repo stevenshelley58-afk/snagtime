@@ -224,7 +224,7 @@ export async function resumeBookingCheckout(id: string, payments: PaymentService
   return { bookingId: booking.id, status: "PENDING_PAYMENT", checkoutState: "RETRY_REQUIRED", checkoutUrl: null };
 }
 
-export async function cancelBooking(id: string, cancellationReason?: string, workspaceId?: string) {
+export async function cancelBooking(id: string, cancellationReason?: string, workspaceId?: string, expectedMutationVersion?: number) {
   enterDatabaseAction("booking_write");
   const current = await db.booking.findFirst({ where: { id, ...(workspaceId ? { workspaceId } : {}) }, include: bookingInclude });
   if (!current) throw notFound("Booking");
@@ -232,7 +232,7 @@ export async function cancelBooking(id: string, cancellationReason?: string, wor
   if (current.blockwiseReference && !blockwiseWebhookConfigured()) throw new AppError("BLOCKWISE_WEBHOOK_NOT_CONFIGURED", "This Blockwise booking cannot be changed until its signed webhook is configured.", 503);
   const updated = await db.$transaction(async (tx) => {
     const mutationNow = new Date();
-    const won = await tx.booking.updateMany({ where: { id, mutationVersion: current.mutationVersion, status: { not: "CANCELLED" }, OR: [{ calendarLeaseToken: null }, { calendarLeaseExpiresAt: { lte: mutationNow } }] }, data: { status: "CANCELLED", mutationVersion: { increment: 1 }, calendarLeaseToken: null, calendarLeaseExpiresAt: null, cancellationReason: cancellationReason?.trim() || "INVITEE_CANCELLED", calendarSyncStatus: "PENDING", notificationStatus: "PENDING" } });
+    const won = await tx.booking.updateMany({ where: { id, mutationVersion: expectedMutationVersion ?? current.mutationVersion, status: { not: "CANCELLED" }, OR: [{ calendarLeaseToken: null }, { calendarLeaseExpiresAt: { lte: mutationNow } }] }, data: { status: "CANCELLED", mutationVersion: { increment: 1 }, calendarLeaseToken: null, calendarLeaseExpiresAt: null, cancellationReason: cancellationReason?.trim() || "INVITEE_CANCELLED", calendarSyncStatus: "PENDING", notificationStatus: "PENDING" } });
     if (won.count !== 1) throw conflict("The booking changed while cancellation was being applied. Refresh and try again.");
     await tx.bookingOccupancy.deleteMany({ where: { bookingId: id } });
     await tx.bookingCapability.updateMany({ where: { bookingId: id, scope: { in: ["cancel", "reschedule"] }, revokedAt: null }, data: { revokedAt: new Date() } });
@@ -253,7 +253,7 @@ export async function cancelBooking(id: string, cancellationReason?: string, wor
   return mapBooking(updated);
 }
 
-export async function rescheduleBooking(id: string, startAt: string, calendar: CalendarService = getCalendarService(), workspaceId?: string) {
+export async function rescheduleBooking(id: string, startAt: string, calendar: CalendarService = getCalendarService(), workspaceId?: string, expectedMutationVersion?: number) {
   enterDatabaseAction("booking_write");
   const mutationContext = currentDatabaseContext();
   const booking = await db.booking.findFirst({ where: { id, ...(workspaceId ? { workspaceId } : {}) }, include: { eventType: { include: { durations: true, questions: true } }, host: true } });
@@ -274,7 +274,7 @@ export async function rescheduleBooking(id: string, startAt: string, calendar: C
   try {
     updated = await db.$transaction(async (tx) => {
       const mutationNow = new Date();
-      const won = await tx.booking.updateMany({ where: { id, mutationVersion: booking.mutationVersion, status: "CONFIRMED", OR: [{ calendarLeaseToken: null }, { calendarLeaseExpiresAt: { lte: mutationNow } }] }, data: { startAt: requestedStart, endAt: requestedEnd, manageExpiresAt: renewedManageExpiry, mutationVersion: { increment: 1 }, calendarLeaseToken: null, calendarLeaseExpiresAt: null, calendarSyncStatus: "PENDING", notificationStatus: "PENDING" } });
+      const won = await tx.booking.updateMany({ where: { id, mutationVersion: expectedMutationVersion ?? booking.mutationVersion, status: "CONFIRMED", OR: [{ calendarLeaseToken: null }, { calendarLeaseExpiresAt: { lte: mutationNow } }] }, data: { startAt: requestedStart, endAt: requestedEnd, manageExpiresAt: renewedManageExpiry, mutationVersion: { increment: 1 }, calendarLeaseToken: null, calendarLeaseExpiresAt: null, calendarSyncStatus: "PENDING", notificationStatus: "PENDING" } });
       if (won.count !== 1) throw conflict("The booking changed while rescheduling. Refresh and choose a new time.");
       await tx.bookingOccupancy.deleteMany({ where: { bookingId: id } });
       await tx.bookingOccupancy.createMany({ data: occupiedMinutes(requestedStart, requestedEnd, booking.bufferBeforeMinutes, booking.bufferAfterMinutes).map((minuteStart) => ({ workspaceId: booking.workspaceId, bookingId: id, hostId: booking.hostId, minuteStart })) });
