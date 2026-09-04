@@ -48,7 +48,10 @@ jobs:
 
       - name: Start web runtime and exercise liveness endpoint
         run: |
-          cid=$(docker run -d --network host --env NODE_ENV=production --env BUILD_ID=${GITHUB_SHA} --entrypoint node snagtime:${GITHUB_SHA} apps/web/server.js)
+          # Liveness is intentionally dependency-free. The production readiness
+          # contract is exercised by the existing PostgreSQL CI job; using test
+          # mode here prevents a fake database from weakening that contract.
+          cid=$(docker run -d --network host --env NODE_ENV=test --env BUILD_ID=${GITHUB_SHA} --entrypoint node snagtime:${GITHUB_SHA} apps/web/server.js)
           trap 'docker logs "$cid" || true; docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
           for attempt in $(seq 1 30); do
             if curl --fail --silent --show-error http://127.0.0.1:3000/api/health/live >/dev/null; then exit 0; fi
