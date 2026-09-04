@@ -118,7 +118,7 @@ jobs:
           docker run --rm --network "$network" \
             --volume "$GITHUB_WORKSPACE:/workspace" --workdir /workspace \
             --env-file "$prep_env" \
-            node:24.18.0-bookworm-slim@sha256:d45d78e7929b46875bbd4e29bea672d5bc48186c6c3588306521c815e78352d6 \
+            node:24.19.0-bookworm-slim@sha256:e5a8dee7bc1e6a215d224a7ef8206f7e77271bc3cabd5febf2beafac0674f174 \
             sh -eu -c 'npm ci --ignore-scripts --no-audit --no-fund && npm run db:generate:postgres && npx prisma migrate deploy --schema prisma/postgresql/schema.prisma && npm run db:provision:postgres-logins && node scripts/ci-heartbeat.mjs'
         working-directory: ${{ github.workspace }}
 
@@ -156,7 +156,7 @@ jobs:
           printf 'WORKER_DATABASE_URL=%s\n' "$CONTAINER_WORKER_DATABASE_URL" > "$heartbeat_env"
           docker run --rm --network "$network" --volume "$GITHUB_WORKSPACE:/workspace" --workdir /workspace \
             --env-file "$heartbeat_env" \
-            node:24.18.0-bookworm-slim@sha256:d45d78e7929b46875bbd4e29bea672d5bc48186c6c3588306521c815e78352d6 \
+            node:24.19.0-bookworm-slim@sha256:e5a8dee7bc1e6a215d224a7ef8206f7e77271bc3cabd5febf2beafac0674f174 \
             node scripts/ci-heartbeat.mjs
           rm -f "$heartbeat_env"
           trap - EXIT
