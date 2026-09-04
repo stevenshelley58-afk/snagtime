@@ -124,6 +124,8 @@ jobs:
             --env DEMO_MODE=false \
             --env NEXT_PUBLIC_FREE_ONLY=true \
             --env PAYMENTS_PROVIDER=stripe \
+            --env STRIPE_SECRET_KEY=sk_test_ci \
+            --env STRIPE_WEBHOOK_SECRET=whsec_ci \
             --env CALENDAR_PROVIDER=google \
             --env GOOGLE_CLIENT_ID=ci-proof.apps.googleusercontent.com \
             --env GOOGLE_CLIENT_SECRET=ci-google-client-secret-000001 \
@@ -135,10 +137,11 @@ jobs:
             --entrypoint node snagtime:${GITHUB_SHA} apps/web/server.js)
           trap 'docker logs "$cid" || true; docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
           for attempt in $(seq 1 30); do
-            if curl --fail --silent --show-error http://127.0.0.1:3000/api/health/live >/dev/null; then exit 0; fi
+            if curl --fail --silent --show-error http://127.0.0.1:3000/api/health/live >/dev/null; then break; fi
             sleep 2
           done
-          exit 1
+          curl --fail --silent --show-error http://127.0.0.1:3000/api/health/live >/dev/null
+          curl --fail --silent --show-error http://127.0.0.1:3000/api/health/ready >/dev/null
 
       - name: Scan actionable vulnerabilities
         run: |
