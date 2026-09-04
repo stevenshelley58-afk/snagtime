@@ -69,7 +69,7 @@ function run(env) {
 }
 for (const [role, env] of [["app", app], ["worker", worker]]) {
   const result = run(env);
-  if (result.status !== 0) throw new Error(`production ${role} configuration fixture rejected`);
+  if (result.status !== 0) throw new Error(`production ${role} configuration fixture rejected: ${result.stderr.trim()}`);
   if (result.stdout.includes(env.GOOGLE_CLIENT_SECRET) || result.stderr.includes(env.GOOGLE_CLIENT_SECRET)) {
     throw new Error(`production ${role} configuration printed a secret`);
   }
