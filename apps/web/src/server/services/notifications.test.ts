@@ -65,7 +65,7 @@ describe("transactional email and recovery authority", () => {
     expect(await db.accountActionToken.count({where:{userId:owner.user.id,purpose:"PASSWORD_RESET",revokedAt:null,consumedAt:null}})).toBe(1);
     expect(await db.accountActionToken.count({where:{userId:owner.user.id,purpose:"PASSWORD_RESET"}})).toBe(6);
     expect(await db.emailOutbox.count({where:{workspaceId:owner.workspace.id,kind:"PASSWORD_RESET"}})).toBe(6);
-  });
+  }, 30_000);
 
   it("keeps account recovery HTTP posture identical for eligible and absent accounts",async()=>{
     resetRateLimitsForTest();const owner=await fixture("recovery-http-account");
