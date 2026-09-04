@@ -54,7 +54,6 @@ reference only; a client-supplied workspace identifier is never accepted.
 Run the normal migration before enabling delivery:
 
 ```bash
-npm run db:migrate
 npm run db:migrate:postgres
 ```
 
