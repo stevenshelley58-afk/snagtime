@@ -51,8 +51,12 @@ services:
       EMAIL_FROM: ${EMAIL_FROM:?set sender}
       EMAIL_REPLY_TO: ${EMAIL_REPLY_TO:?set system reply address}
       EMAIL_SENDER_DOMAIN: ${EMAIL_SENDER_DOMAIN:?set authorized sender domain}
-    secrets: [app_database_url, postgres_ca_cert, auth_secret, booking_capability_secret, booking_capability_keyring, token_encryption_key, email_token_secret, tenant_context_secret, rate_limit_hash_secret, proxy_shared_secret, operator_health_secret, smtp_password]
+      BLOCKWISE_WEBHOOK_URL: ${BLOCKWISE_WEBHOOK_URL:-}
+      BLOCKWISE_WEBHOOK_SECRET_FILE: /run/secrets/blockwise_webhook_secret
+    secrets: [app_database_url, postgres_ca_cert, auth_secret, booking_capability_secret, booking_capability_keyring, token_encryption_key, email_token_secret, tenant_context_secret, rate_limit_hash_secret, proxy_shared_secret, operator_health_secret, smtp_password, blockwise_webhook_secret]
     depends_on: { postgres: { condition: service_healthy } }
+    restart: unless-stopped
+    healthcheck: { test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"], interval: 15s, timeout: 4s, retries: 6 }
   worker:
     build: { context: ., target: runtime, args: { BUILD_ID: "${BUILD_ID:?set immutable build identity}", NEXT_PUBLIC_FREE_ONLY: "true" } }
     command: ["node", "dist/worker.mjs"]
@@ -80,8 +84,11 @@ services:
       EMAIL_FROM: ${EMAIL_FROM:?set sender}
       EMAIL_REPLY_TO: ${EMAIL_REPLY_TO:?set system reply address}
       EMAIL_SENDER_DOMAIN: ${EMAIL_SENDER_DOMAIN:?set authorized sender domain}
-    secrets: [worker_database_url, postgres_ca_cert, token_encryption_key, email_token_secret, smtp_password]
+      BLOCKWISE_WEBHOOK_URL: ${BLOCKWISE_WEBHOOK_URL:-}
+      BLOCKWISE_WEBHOOK_SECRET_FILE: /run/secrets/blockwise_webhook_secret
+    secrets: [worker_database_url, postgres_ca_cert, token_encryption_key, email_token_secret, smtp_password, blockwise_webhook_secret]
     depends_on: { postgres: { condition: service_healthy } }
+    restart: unless-stopped
 secrets:
   postgres_owner_password: { external: true }
   app_database_url: { external: true }
@@ -99,5 +106,6 @@ secrets:
   proxy_shared_secret: { external: true }
   operator_health_secret: { external: true }
   smtp_password: { external: true }
+  blockwise_webhook_secret: { external: true }
 volumes:
   postgres_data: {}
