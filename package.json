@@ -24,6 +24,7 @@
     "worker:start": "node dist/worker.mjs",
     "prod:check": "node scripts/production-config.mjs runtime",
     "ci:secret-scan": "node scripts/ci-secret-scan.mjs",
+    "ci:container-image-secret-contract": "node scripts/ci-container-image-secret-contract.mjs",
     "ci:audit-policy": "node scripts/ci-audit-policy.mjs",
     "ci:generated-drift": "node scripts/ci-generated-drift.mjs",
     "ci:postgres-guards": "node scripts/postgres-guard-check.mjs",

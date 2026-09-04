@@ -30,23 +30,60 @@ jobs:
           - 5432
         env:
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: ci-only-ephemeral
+          POSTGRES_HOST_AUTH_METHOD: trust
           POSTGRES_DB: snagtime_ci
         options: --health-cmd "pg_isready -U postgres -d snagtime_ci" --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
       - name: Check out exact revision
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
+      - name: Generate ephemeral CI secret material
+        shell: bash
+        run: |
+          set -euo pipefail
+          mask_and_export() {
+            local name="$1" value="$2"
+            printf '::add-mask::%s\n' "$value"
+            printf '%s=%s\n' "$name" "$value" >> "$GITHUB_ENV"
+          }
+          random_secret() { openssl rand -hex 32; }
+          auth_secret=$(random_secret); mask_and_export AUTH_SECRET "$auth_secret"
+          booking_secret=$(random_secret); mask_and_export BOOKING_CAPABILITY_SECRET "$booking_secret"
+          rate_secret=$(random_secret); mask_and_export RATE_LIMIT_HASH_SECRET "$rate_secret"
+          tenant_secret=$(random_secret); mask_and_export TENANT_CONTEXT_SECRET "$tenant_secret"
+          token_key=$(openssl rand -hex 32); mask_and_export TOKEN_ENCRYPTION_KEY "$token_key"
+          proxy_secret=$(random_secret); mask_and_export PROXY_SHARED_SECRET "$proxy_secret"
+          operator_secret=$(random_secret); mask_and_export OPERATOR_HEALTH_SECRET "$operator_secret"
+          google_secret=$(random_secret); mask_and_export GOOGLE_CLIENT_SECRET "$google_secret"
+          email_secret=$(random_secret); mask_and_export EMAIL_TOKEN_SECRET "$email_secret"
+          blockwise_secret=$(random_secret); mask_and_export BLOCKWISE_WEBHOOK_SECRET "$blockwise_secret"
+          stripe_secret="sk_test_$(openssl rand -hex 24)"; mask_and_export STRIPE_SECRET_KEY "$stripe_secret"
+          stripe_webhook="whsec_$(openssl rand -hex 24)"; mask_and_export STRIPE_WEBHOOK_SECRET "$stripe_webhook"
+          smtp_password=$(random_secret); mask_and_export SMTP_PASSWORD "$smtp_password"
+          app_db_password=$(random_secret); mask_and_export TEMPOCOVE_APP_DB_PASSWORD "$app_db_password"
+          worker_db_password=$(random_secret); mask_and_export TEMPOCOVE_WORKER_DB_PASSWORD "$worker_db_password"
+          monitor_db_password=$(random_secret); mask_and_export TEMPOCOVE_MONITOR_DB_PASSWORD "$monitor_db_password"
+          migration_db_password=$(random_secret); mask_and_export TEMPOCOVE_MIGRATION_DB_PASSWORD "$migration_db_password"
+          port='${{ job.services.postgres.ports[5432] }}'
+          database_url="postgresql://postgres@127.0.0.1:${port}/snagtime_ci?sslmode=verify-full&sslrootcert=${GITHUB_WORKSPACE}/ci-certs/ca.crt&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000"
+          container_database_url="postgresql://postgres@postgres:5432/snagtime_ci?sslmode=verify-full&sslrootcert=/workspace/ci-certs/ca.crt&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000"
+          url_prefix='postgresql://'; url_separator=':'; url_at='@'
+          worker_database_url=$(printf '%s%s%s%s%s127.0.0.1:%s%s' "$url_prefix" 'tempocove_worker_login' "$url_separator" "$worker_db_password" "$url_at" "$port" '/snagtime_ci?sslmode=verify-full&sslrootcert='"${GITHUB_WORKSPACE}"'/ci-certs/ca.crt&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000')
+          container_worker_database_url=$(printf '%s%s%s%s%s%s' "$url_prefix" 'tempocove_worker_login' "$url_separator" "$worker_db_password" "$url_at" 'postgres:5432/snagtime_ci?sslmode=verify-full&sslrootcert=/workspace/ci-certs/ca.crt&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000')
+          container_app_database_url=$(printf '%s%s%s%s%s%s' "$url_prefix" 'tempocove_app_login' "$url_separator" "$app_db_password" "$url_at" 'postgres:5432/snagtime_ci?sslmode=verify-full&sslrootcert=/run/secrets/ci-ca&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000')
+          container_monitor_database_url=$(printf '%s%s%s%s%s%s' "$url_prefix" 'tempocove_monitor_login' "$url_separator" "$monitor_db_password" "$url_at" 'postgres:5432/snagtime_ci?sslmode=verify-full&sslrootcert=/run/secrets/ci-ca&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000')
+          booking_keyring=$(printf '{"ci-booking-v1":"%s"}' "$booking_secret")
+          mask_and_export DATABASE_URL "$database_url"
+          mask_and_export CONTAINER_DATABASE_URL "$container_database_url"
+          mask_and_export WORKER_DATABASE_URL "$worker_database_url"
+          mask_and_export CONTAINER_WORKER_DATABASE_URL "$container_worker_database_url"
+          mask_and_export CONTAINER_APP_DATABASE_URL "$container_app_database_url"
+          mask_and_export CONTAINER_MONITOR_DATABASE_URL "$container_monitor_database_url"
+          mask_and_export BOOKING_CAPABILITY_KEYRING "$booking_keyring"
+
       - name: Prepare TLS PostgreSQL and production schema
         env:
           PG_CONTAINER: ${{ job.services.postgres.id }}
-          DATABASE_URL: postgresql://postgres:ci-only-ephemeral@127.0.0.1:${{ job.services.postgres.ports[5432] }}/snagtime_ci?sslmode=verify-full&sslrootcert=${{ github.workspace }}/ci-certs/ca.crt&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000
-          WORKER_DATABASE_URL: postgresql://tempocove_worker_login:CI-Worker-Database-Password-0000000001@127.0.0.1:${{ job.services.postgres.ports[5432] }}/snagtime_ci?sslmode=verify-full&sslrootcert=${{ github.workspace }}/ci-certs/ca.crt&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000
-          TENANT_CONTEXT_SECRET: ci-tenant-context-secret-00000000000001
-          TEMPOCOVE_APP_DB_PASSWORD: CI-App-Database-Password-00000000000001
-          TEMPOCOVE_WORKER_DB_PASSWORD: CI-Worker-Database-Password-0000000001
-          TEMPOCOVE_MONITOR_DB_PASSWORD: CI-Monitor-Database-Password-000000001
-          TEMPOCOVE_MIGRATION_DB_PASSWORD: CI-Migration-Database-Password-0000001
         run: |
           set -euo pipefail
           mkdir -p ci-certs
@@ -65,20 +102,31 @@ jobs:
           docker restart "$PG_CONTAINER" >/dev/null
           for attempt in $(seq 1 20); do docker exec "$PG_CONTAINER" pg_isready -U postgres -d snagtime_ci && break || sleep 1; done
           network=$(docker inspect "$PG_CONTAINER" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}')
+          prep_env=$(mktemp)
+          chmod 600 "$prep_env"
+          trap 'rm -f "$prep_env"' EXIT
+          {
+            printf 'DATABASE_URL=%s\n' "$CONTAINER_DATABASE_URL"
+            printf 'WORKER_DATABASE_URL=%s\n' "$CONTAINER_WORKER_DATABASE_URL"
+            printf 'TENANT_CONTEXT_SECRET=%s\n' "$TENANT_CONTEXT_SECRET"
+            printf 'TEMPOCOVE_APP_DB_PASSWORD=%s\n' "$TEMPOCOVE_APP_DB_PASSWORD"
+            printf 'TEMPOCOVE_WORKER_DB_PASSWORD=%s\n' "$TEMPOCOVE_WORKER_DB_PASSWORD"
+            printf 'TEMPOCOVE_MONITOR_DB_PASSWORD=%s\n' "$TEMPOCOVE_MONITOR_DB_PASSWORD"
+            printf 'TEMPOCOVE_MIGRATION_DB_PASSWORD=%s\n' "$TEMPOCOVE_MIGRATION_DB_PASSWORD"
+            printf 'PGAPPNAME=%s\n' "$GITHUB_SHA"
+          } > "$prep_env"
           docker run --rm --network "$network" \
             --volume "$GITHUB_WORKSPACE:/workspace" --workdir /workspace \
-            --env DATABASE_URL='postgresql://postgres:ci-only-ephemeral@postgres:5432/snagtime_ci?sslmode=verify-full&sslrootcert=/workspace/ci-certs/ca.crt&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000' \
-            --env WORKER_DATABASE_URL='postgresql://tempocove_worker_login:CI-Worker-Database-Password-0000000001@postgres:5432/snagtime_ci?sslmode=verify-full&sslrootcert=/workspace/ci-certs/ca.crt&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000' \
-            --env TENANT_CONTEXT_SECRET="$TENANT_CONTEXT_SECRET" \
-            --env TEMPOCOVE_APP_DB_PASSWORD="$TEMPOCOVE_APP_DB_PASSWORD" --env TEMPOCOVE_WORKER_DB_PASSWORD="$TEMPOCOVE_WORKER_DB_PASSWORD" \
-            --env TEMPOCOVE_MONITOR_DB_PASSWORD="$TEMPOCOVE_MONITOR_DB_PASSWORD" --env TEMPOCOVE_MIGRATION_DB_PASSWORD="$TEMPOCOVE_MIGRATION_DB_PASSWORD" \
-            --env PGAPPNAME="$GITHUB_SHA" \
+            --env-file "$prep_env" \
             node:24.15.0-bookworm-slim@sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d \
             sh -eu -c 'npm ci --ignore-scripts --no-audit --no-fund && npm run db:generate:postgres && npx prisma migrate deploy --schema prisma/postgresql/schema.prisma && npm run db:provision:postgres-logins && node scripts/ci-heartbeat.mjs'
         working-directory: ${{ github.workspace }}
 
       - name: Set up BuildKit
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
+
+      - name: Check container image secret contract
+        run: npm run ci:container-image-secret-contract
 
       - name: Build immutable runtime image
         run: |
@@ -100,30 +148,31 @@ jobs:
         env:
           PG_CONTAINER: ${{ job.services.postgres.id }}
         run: |
-          printf '%s' 'postgresql://tempocove_app_login:CI-App-Database-Password-00000000000001@postgres:5432/snagtime_ci?sslmode=verify-full&sslrootcert=/run/secrets/ci-ca&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000' > ci-certs/DATABASE_URL
-          printf '%s' 'ci-auth-secret-00000000000000000000000000000001' > ci-certs/AUTH_SECRET
-          printf '%s' 'postgresql://tempocove_worker_login:CI-Worker-Database-Password-0000000001@postgres:5432/snagtime_ci?sslmode=verify-full&sslrootcert=/run/secrets/ci-ca' > ci-certs/WORKER_DATABASE_URL
-          printf '%s' 'postgresql://tempocove_monitor_login:CI-Monitor-Database-Password-000000001@postgres:5432/snagtime_ci?sslmode=verify-full&sslrootcert=/run/secrets/ci-ca' > ci-certs/MONITOR_DATABASE_URL
-          printf '%s' 'ci-booking-capability-secret-00000000000000000001' > ci-certs/BOOKING_CAPABILITY_SECRET
-          printf '%s' '{"ci-booking-v1":"ci-booking-capability-secret-00000000000000000001"}' > ci-certs/BOOKING_CAPABILITY_KEYRING
-          printf '%s' 'ci-rate-limit-hash-secret-0000000000000001' > ci-certs/RATE_LIMIT_HASH_SECRET
-          printf '%s' 'ci-tenant-context-secret-00000000000001' > ci-certs/TENANT_CONTEXT_SECRET
-          printf '%s' '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff' > ci-certs/TOKEN_ENCRYPTION_KEY
-          printf '%s' 'ci-proxy-shared-secret-000000000000001' > ci-certs/PROXY_SHARED_SECRET
-          printf '%s' 'ci-operator-health-secret-00000001' > ci-certs/OPERATOR_HEALTH_SECRET
-          printf '%s' 'ci-google-client-secret-000001' > ci-certs/GOOGLE_CLIENT_SECRET
-          printf '%s' 'ci-email-token-secret-0000000000000001' > ci-certs/EMAIL_TOKEN_SECRET
-          printf '%s' 'ci-blockwise-webhook-secret-000000000001' > ci-certs/BLOCKWISE_WEBHOOK_SECRET
-          printf '%s' 'sk_test_ci' > ci-certs/STRIPE_SECRET_KEY
-          printf '%s' 'whsec_ci' > ci-certs/STRIPE_WEBHOOK_SECRET
-          printf '%s' 'ci-smtp-password' > ci-certs/SMTP_PASSWORD
-          secret_dir="$GITHUB_WORKSPACE/runtime-secrets"
+          set -euo pipefail
+          secret_dir=$(mktemp -d)
           sudo install -d -o 1000 -g 1000 -m 0700 "$secret_dir"
           sudo install -o 1000 -g 1000 -m 0400 ci-certs/ca.crt "$secret_dir/ci-ca"
-          for source in ci-certs/DATABASE_URL ci-certs/WORKER_DATABASE_URL ci-certs/MONITOR_DATABASE_URL ci-certs/AUTH_SECRET ci-certs/BOOKING_CAPABILITY_SECRET ci-certs/BOOKING_CAPABILITY_KEYRING ci-certs/RATE_LIMIT_HASH_SECRET ci-certs/TENANT_CONTEXT_SECRET ci-certs/TOKEN_ENCRYPTION_KEY ci-certs/PROXY_SHARED_SECRET ci-certs/OPERATOR_HEALTH_SECRET ci-certs/GOOGLE_CLIENT_SECRET ci-certs/EMAIL_TOKEN_SECRET ci-certs/BLOCKWISE_WEBHOOK_SECRET ci-certs/STRIPE_SECRET_KEY ci-certs/STRIPE_WEBHOOK_SECRET ci-certs/SMTP_PASSWORD; do sudo install -o 1000 -g 1000 -m 0400 "$source" "$secret_dir/$(basename "$source")"; done
+          write_secret() { local name="$1" value="$2"; printf '::add-mask::%s\n' "$value"; sudo install -o 1000 -g 1000 -m 0400 /dev/null "$secret_dir/$name"; printf '%s' "$value" | sudo tee "$secret_dir/$name" >/dev/null; sudo chown 1000:1000 "$secret_dir/$name"; sudo chmod 0400 "$secret_dir/$name"; }
+          write_secret DATABASE_URL "$CONTAINER_APP_DATABASE_URL"
+          write_secret WORKER_DATABASE_URL "$CONTAINER_WORKER_DATABASE_URL"
+          write_secret MONITOR_DATABASE_URL "$CONTAINER_MONITOR_DATABASE_URL"
+          write_secret AUTH_SECRET "$AUTH_SECRET"
+          write_secret BOOKING_CAPABILITY_SECRET "$BOOKING_CAPABILITY_SECRET"
+          write_secret BOOKING_CAPABILITY_KEYRING "$BOOKING_CAPABILITY_KEYRING"
+          write_secret RATE_LIMIT_HASH_SECRET "$RATE_LIMIT_HASH_SECRET"
+          write_secret TENANT_CONTEXT_SECRET "$TENANT_CONTEXT_SECRET"
+          write_secret TOKEN_ENCRYPTION_KEY "$TOKEN_ENCRYPTION_KEY"
+          write_secret PROXY_SHARED_SECRET "$PROXY_SHARED_SECRET"
+          write_secret OPERATOR_HEALTH_SECRET "$OPERATOR_HEALTH_SECRET"
+          write_secret GOOGLE_CLIENT_SECRET "$GOOGLE_CLIENT_SECRET"
+          write_secret EMAIL_TOKEN_SECRET "$EMAIL_TOKEN_SECRET"
+          write_secret BLOCKWISE_WEBHOOK_SECRET "$BLOCKWISE_WEBHOOK_SECRET"
+          write_secret STRIPE_SECRET_KEY "$STRIPE_SECRET_KEY"
+          write_secret STRIPE_WEBHOOK_SECRET "$STRIPE_WEBHOOK_SECRET"
+          write_secret SMTP_PASSWORD "$SMTP_PASSWORD"
           secret_volume="snagtime-secrets-${GITHUB_SHA}"
           docker volume create "$secret_volume" >/dev/null
-          docker run --rm --user 0 --volume "$secret_volume:/run/secrets" --volume "$secret_dir:/source:ro" snagtime:${GITHUB_SHA} sh -eu -c 'chown 1000:1000 /run/secrets; chmod 0700 /run/secrets; for source in /source/*; do install -o 1000 -g 1000 -m 0400 "$source" "/run/secrets/$(basename "$source")"; done; chown 1000:1000 /run/secrets; chmod 0700 /run/secrets; stat -c "%u:%g %a" /run/secrets /run/secrets/DATABASE_URL'
+          docker run --rm --user 0 --volume "$secret_volume:/run/secrets" --volume "$secret_dir:/source:ro" snagtime:${GITHUB_SHA} sh -eu -c 'chown 1000:1000 /run/secrets; chmod 0700 /run/secrets; for source in /source/*; do install -o 1000 -g 1000 -m 0400 "$source" "/run/secrets/$(basename "$source")"; done; chown 1000:1000 /run/secrets; chmod 0700 /run/secrets; test "$(stat -c "%u:%g:%a" /run/secrets)" = 1000:1000:700; for secret in /run/secrets/*; do test "$(stat -c "%u:%g:%a" "$secret")" = 1000:1000:400; done'
           docker run --rm --user 1000:1000 --volume "$secret_volume:/run/secrets:ro" \
             --env DATABASE_URL_FILE=/run/secrets/DATABASE_URL --env WORKER_DATABASE_URL_FILE=/run/secrets/WORKER_DATABASE_URL --env MONITOR_DATABASE_URL_FILE=/run/secrets/MONITOR_DATABASE_URL \
             --env AUTH_SECRET_FILE=/run/secrets/AUTH_SECRET --env BOOKING_CAPABILITY_SECRET_FILE=/run/secrets/BOOKING_CAPABILITY_SECRET --env BOOKING_CAPABILITY_KEYRING_FILE=/run/secrets/BOOKING_CAPABILITY_KEYRING \
@@ -132,6 +181,7 @@ jobs:
             --env EMAIL_TOKEN_SECRET_FILE=/run/secrets/EMAIL_TOKEN_SECRET --env BLOCKWISE_WEBHOOK_SECRET_FILE=/run/secrets/BLOCKWISE_WEBHOOK_SECRET --env STRIPE_SECRET_KEY_FILE=/run/secrets/STRIPE_SECRET_KEY --env STRIPE_WEBHOOK_SECRET_FILE=/run/secrets/STRIPE_WEBHOOK_SECRET --env SMTP_PASSWORD_FILE=/run/secrets/SMTP_PASSWORD \
             snagtime:${GITHUB_SHA} node -e "const fs=require('fs'); for (const n of ['DATABASE_URL','WORKER_DATABASE_URL','MONITOR_DATABASE_URL','AUTH_SECRET','BOOKING_CAPABILITY_SECRET','BOOKING_CAPABILITY_KEYRING','RATE_LIMIT_HASH_SECRET','TENANT_CONTEXT_SECRET','TOKEN_ENCRYPTION_KEY','PROXY_SHARED_SECRET','OPERATOR_HEALTH_SECRET','GOOGLE_CLIENT_SECRET','EMAIL_TOKEN_SECRET','BLOCKWISE_WEBHOOK_SECRET','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','SMTP_PASSWORD']) { if (!process.env[n] || process.env[n+'_FILE']) throw new Error('secret file contract failed for '+n); fs.accessSync('/run/secrets/'+n) }"
           ! docker run --rm --user 1001:1001 --volume "$secret_volume:/run/secrets:ro" snagtime:${GITHUB_SHA} node -e "require('fs').readFileSync('/run/secrets/DATABASE_URL')"
+          ! docker run --rm --user 1000:1000 --volume "$secret_volume:/run/secrets:ro" --entrypoint node snagtime:${GITHUB_SHA} -e "require('fs').writeFileSync('/run/secrets/readonly-check','denied')"
           cid=$(docker run -d --network "$(docker inspect "$PG_CONTAINER" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}')" -p 3000:3000 \
             --env NODE_ENV=production \
             --env BUILD_ID=${GITHUB_SHA} \
