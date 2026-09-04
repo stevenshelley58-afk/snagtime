@@ -31,6 +31,11 @@ COPY --from=builder --chown=node:node /src/apps/web/.next/static ./apps/web/.nex
 COPY --from=builder --chown=node:node /src/dist ./dist
 COPY --chown=node:node scripts/container-entrypoint.mjs ./scripts/container-entrypoint.mjs
 COPY --chown=node:node scripts/runtime-dependency-check.mjs ./scripts/runtime-dependency-check.mjs
+# The production entrypoint executes Node directly; keep the package manager out
+# of the runtime image to reduce attack surface and avoid shipping its build-time
+# dependency tree.
+RUN rm -rf /usr/local/lib/node_modules/npm \
+ && rm -f /usr/local/bin/npm /usr/local/bin/npx
 USER 1000:1000
 EXPOSE 3000
 ENTRYPOINT ["node","scripts/container-entrypoint.mjs"]
