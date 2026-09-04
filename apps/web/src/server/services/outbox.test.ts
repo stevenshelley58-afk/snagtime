@@ -1,15 +1,42 @@
 import { randomUUID } from "node:crypto";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/server/db";
 import { cancelBooking } from "@/server/services/bookings";
 import { CALENDAR_LEASE_MS, INTEGRATION_MAX_ATTEMPTS, processOutbox, recordOutboxRetry, withProviderDeadline } from "@/server/services/outbox";
 import { CALENDAR_PROVIDER_TIMEOUT_MS, providerCalendarEventId } from "@/server/services/calendar";
 import type { CalendarService } from "@/server/services/calendar";
 import type { PaymentService } from "@/server/services/payments";
+import { buildBlockwiseBookingEvent, signBlockwisePayload } from "@/server/services/blockwise-events";
 
 describe("calendar outbox ownership and lease recovery", () => {
   beforeEach(() => { process.env.CALENDAR_PROVIDER = "local"; });
   afterEach(() => { delete process.env.CALENDAR_PROVIDER; delete process.env.GOOGLE_CLIENT_ID; delete process.env.GOOGLE_CLIENT_SECRET; delete process.env.GOOGLE_REFRESH_TOKEN; delete process.env.GOOGLE_ENV_WORKSPACE_ID; delete process.env.DEMO_MODE; });
+
+  it("replays a Blockwise webhook with the exact persisted signed request", async () => {
+    const secret = "blockwise-outbox-test-secret-with-at-least-32-bytes";
+    vi.stubEnv("BLOCKWISE_WEBHOOK_SECRET", secret);
+    vi.stubEnv("BLOCKWISE_WEBHOOK_URL", "https://blockwise.example/webhook");
+    const eventType = await db.eventType.findFirstOrThrow({ include: { durations: true } });
+    const duration = eventType.durations[0]!;
+    const bookingId = randomUUID();
+    const occurredAt = new Date("2099-01-01T00:00:00.000Z");
+    const eventId = "6a2f0a44-2df2-4d63-9d1e-6a30ec5f51f0";
+    const event = buildBlockwiseBookingEvent({ id: bookingId, eventTypeId: eventType.id, workspaceId: eventType.workspaceId, blockwiseReference: "invite-outbox", inviteeName: "Outbox", inviteeEmail: "outbox@example.invalid", startAt: new Date("2099-01-02T00:00:00Z"), endAt: new Date("2099-01-02T00:30:00Z") }, "created", eventId, occurredAt);
+    const payloadJson = JSON.stringify(event); const signingTimestamp = 9007199254740993n; const signingSignature = signBlockwisePayload(payloadJson, signingTimestamp.toString(), secret);
+    await db.booking.create({ data: { id: bookingId, workspaceId: eventType.workspaceId, eventTypeId: eventType.id, hostId: eventType.ownerId, durationId: duration.id, durationMinutes: duration.durationMinutes, inviteeName: "Outbox", inviteeEmail: "outbox@example.invalid", inviteeTimeZone: "UTC", startAt: new Date("2099-01-02T00:00:00Z"), endAt: new Date("2099-01-02T00:30:00Z"), status: "CONFIRMED", blockwiseReference: "invite-outbox", capabilityVersion: randomUUID(), manageExpiresAt: new Date("2099-02-01T00:00:00Z"), outboxEffects: { create: { workspaceId: eventType.workspaceId, kind: "BLOCKWISE_BOOKING_EVENT", eventId, payloadJson, destinationUrl: "https://blockwise.example/webhook", signingTimestamp, signingSignature, idempotencyKey: "blockwise:outbox:stable" } } } });
+    const calls: Array<{ body: string | null; headers: Headers }> = [];
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => { calls.push({ body: (init?.body as string) ?? null, headers: new Headers(init?.headers) }); return new Response(null, { status: calls.length === 1 ? 503 : 204 }); });
+    const calendar: CalendarService = { async getBusyIntervals() { return []; }, async createBookingEvent() { return null; }, async updateBookingEvent() {}, async deleteBookingEvent() {} };
+    await processOutbox(eventType.workspaceId, bookingId, new Date("2099-01-01T00:01:00Z"), calendar);
+    await db.integrationOutbox.updateMany({ where: { bookingId }, data: { nextAttemptAt: new Date("2099-01-01T00:00:00Z") } });
+    await processOutbox(eventType.workspaceId, bookingId, new Date("2099-01-01T00:02:00Z"), calendar);
+    expect(calls).toHaveLength(2); expect(calls[0]!.body).toBe(payloadJson); expect(calls[1]!.body).toBe(payloadJson);
+    expect(calls[0]!.headers.get("x-snagtime-event-id")).toBe(eventId); expect(calls[1]!.headers.get("x-snagtime-event-id")).toBe(eventId);
+    expect(calls[0]!.headers.get("x-snagtime-timestamp")).toBe(signingTimestamp.toString()); expect(calls[1]!.headers.get("x-snagtime-timestamp")).toBe(signingTimestamp.toString());
+    expect(calls[0]!.headers.get("x-snagtime-signature")).toBe(`sha256=${signingSignature}`); expect(calls[1]!.headers.get("x-snagtime-signature")).toBe(`sha256=${signingSignature}`);
+    expect(await db.integrationOutbox.findFirstOrThrow({ where: { bookingId } })).toMatchObject({ status: "COMPLETED", attemptCount: 2 });
+    fetchMock.mockRestore(); vi.unstubAllEnvs(); await db.booking.delete({ where: { id: bookingId } });
+  });
 
   it("bounds provider calls substantially below the authoritative lease", async () => {
     expect(CALENDAR_LEASE_MS).toBeGreaterThan(CALENDAR_PROVIDER_TIMEOUT_MS * 4);

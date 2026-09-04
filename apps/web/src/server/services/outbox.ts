@@ -3,6 +3,8 @@ import { db } from "@/server/db";
 import { CALENDAR_PROVIDER_TIMEOUT_MS, getCalendarService, googleCredentialsReady, providerCalendarEventId, type CalendarService } from "@/server/services/calendar";
 import { retryPendingGoogleDisconnects } from "@/server/services/calendar";
 import { getPaymentService, type PaymentService } from "@/server/services/payments";
+import { freeOnlyEnabled } from "@/server/free-only";
+import { blockwiseDeliveryRequest } from "@/server/services/blockwise-delivery";
 
 export const CALENDAR_LEASE_MS = 120_000;
 export const INTEGRATION_MAX_ATTEMPTS = 12;
@@ -70,7 +72,21 @@ export async function processOutbox(workspaceId: string, bookingId?: string, now
     try {
       const booking = await db.booking.findFirstOrThrow({ where: { id: effect.bookingId, workspaceId }, include: workerBookingInclude });
       claimedBookingVersion = booking.mutationVersion;
-      if (booking.calendarProviderSnapshot === "provider_recovery_required") {
+      if (effect.kind === "BLOCKWISE_BOOKING_EVENT") {
+        if (!effect.payloadJson || !effect.eventId || !effect.destinationUrl) throw new Error("BLOCKWISE_WEBHOOK_NOT_CONFIGURED");
+        const destination = new URL(effect.destinationUrl);
+        if (process.env.NODE_ENV === "production" && destination.protocol !== "https:") throw new Error("BLOCKWISE_WEBHOOK_HTTPS_REQUIRED");
+        if (effect.signingTimestamp == null || !effect.signingSignature) throw new Error("BLOCKWISE_SIGNING_TIMESTAMP_NOT_CONFIGURED");
+        const timestamp = effect.signingTimestamp.toString();
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10_000);
+        try {
+          const response = await fetch(destination, { ...blockwiseDeliveryRequest(effect.payloadJson, effect.eventId, timestamp, effect.signingSignature), signal: controller.signal });
+          if (!response.ok) throw new Error(`BLOCKWISE_WEBHOOK_HTTP_${response.status}`);
+        } finally { clearTimeout(timeout); }
+      } else if (freeOnlyEnabled() && effect.kind.startsWith("STRIPE_")) {
+        throw new Error("FREE_ONLY_MODE");
+      } else if (booking.calendarProviderSnapshot === "provider_recovery_required") {
         if (effect.kind !== "CALENDAR_DELETE") throw new Error("CALENDAR_PROVIDER_RECOVERY_REQUIRED");
         assertWorkerRunning(signal);
         if (!await googleCredentialsReady(booking.hostId, booking.workspaceId)) throw new Error("GOOGLE_CALENDAR_RETRY");

@@ -26,6 +26,14 @@ describe("paid booking cancellation recovery", () => {
     await db.booking.delete({ where: { id: bookingId } });
   });
 
+  it("returns an already-cancelled Blockwise booking without requiring webhook configuration", async () => {
+    const event = await db.eventType.findFirstOrThrow({ include: { durations: true } }); const duration = event.durations[0]!; const bookingId = randomUUID();
+    await db.booking.create({ data: { id: bookingId, workspaceId: event.workspaceId, eventTypeId: event.id, hostId: event.ownerId, durationId: duration.id, durationMinutes: duration.durationMinutes, inviteeName: "Already cancelled", inviteeEmail: "already-cancelled-blockwise@example.invalid", inviteeTimeZone: "UTC", blockwiseReference: "invite-cancelled", startAt: new Date("2099-08-02T00:00:00Z"), endAt: new Date("2099-08-02T00:30:00Z"), status: "CANCELLED", capabilityVersion: randomUUID(), manageExpiresAt: new Date("2099-09-02T00:00:00Z") } });
+    await expect(cancelBooking(bookingId, "replayed cancellation")).resolves.toMatchObject({ status: "CANCELLED" });
+    expect(await db.integrationOutbox.count({ where: { bookingId, kind: "BLOCKWISE_BOOKING_EVENT" } })).toBe(0);
+    await db.booking.delete({ where: { id: bookingId } });
+  });
+
   it("resumes Checkout from the server snapshot through the booking-specific HttpOnly session without client PII", async () => {
     const event = await db.eventType.findFirstOrThrow({ include: { durations: true } }); const duration = event.durations[0]!; const bookingId = randomUUID(); const sessionToken = randomUUID();
     await db.booking.create({ data: {
@@ -145,10 +153,14 @@ describe("paid booking cancellation recovery", () => {
       id: bookingId, workspaceId: event.workspaceId, eventTypeId: event.id, hostId: event.ownerId, durationId: duration.id, durationMinutes: duration.durationMinutes,
       inviteeName: "Successive Reschedule", inviteeEmail: "successive@example.com", inviteeTimeZone: "America/Chicago", startAt: new Date("2099-08-25T15:00:00Z"), endAt: new Date("2099-08-25T15:30:00Z"), status: "CONFIRMED", bookingWindowDays: 30000,
       idempotencyKey: randomUUID(), requestFingerprint: randomUUID(), capabilityVersion: randomUUID(), manageExpiresAt: new Date("2099-09-25T00:00:00Z"),
-      occupancies: { create: { workspaceId: event.workspaceId, hostId: event.ownerId, minuteStart: new Date("2099-08-25T15:00:00Z") } },
+      blockwiseReference: "invite-same-start", occupancies: { create: { workspaceId: event.workspaceId, hostId: event.ownerId, minuteStart: new Date("2099-08-25T15:00:00Z") } },
       manageSessions: { create: { tokenHash: createHash("sha256").update(sessionToken).digest("hex"), scopes: "read,cancel,reschedule", expiresAt: new Date("2099-09-25T00:00:00Z"), acknowledgedAt: new Date("2099-08-21T00:00:00Z") } },
     } });
     const call = (startAt: string) => patchBooking(new Request(`http://localhost:3000/api/bookings/${bookingId}`, { method: "PATCH", headers: { origin: "http://localhost:3000", cookie: `${manageCookieName(bookingId)}=${sessionToken}`, "content-type": "application/json" }, body: JSON.stringify({ startAt }) }), { params: Promise.resolve({ id: bookingId }) });
+    delete process.env.BLOCKWISE_WEBHOOK_URL; delete process.env.BLOCKWISE_WEBHOOK_SECRET;
+    expect((await call("2099-08-25T15:00:00.000Z")).status).toBe(200);
+    expect(await db.booking.findUniqueOrThrow({ where: { id: bookingId } })).toMatchObject({ mutationVersion: 0, startAt: new Date("2099-08-25T15:00:00Z") });
+    process.env.BLOCKWISE_WEBHOOK_URL = "https://blockwise.example/webhook"; process.env.BLOCKWISE_WEBHOOK_SECRET = "blockwise-reschedule-test-secret-with-at-least-32-bytes";
     expect((await getManageSlots(new Request(`http://localhost:3000/api/bookings/${bookingId}/slots?from=2099-08-24T00:00:00Z&to=2099-08-25T00:00:00Z&timeZone=Not/AZone`, { headers: { cookie: `${manageCookieName(bookingId)}=${sessionToken}` } }), { params: Promise.resolve({ id: bookingId }) })).status).toBe(400);
     for (let index = 0; index < 35; index += 1) expect((await getBooking(new Request(`http://localhost:3000/api/bookings/${bookingId}`, { headers: { cookie: `${manageCookieName(bookingId)}=${sessionToken}` } }), { params: Promise.resolve({ id: bookingId }) })).status).toBe(200);
     expect((await call("2099-08-24T15:00:00.000Z")).status).toBe(200);

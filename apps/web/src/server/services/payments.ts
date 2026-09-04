@@ -2,11 +2,14 @@ import { createHash } from "node:crypto";
 import { Prisma, type Booking, type EventType } from "@prisma/client";
 import Stripe from "stripe";
 import { enqueueBookingEmail } from "@/server/services/notifications";
+import { blockwiseSnapshot, blockwiseWebhookConfigured, enqueueBlockwiseBookingEvent } from "@/server/services/blockwise-events";
 import { db } from "@/server/db";
 import { AppError } from "@/server/errors";
 import { enterProviderDatabaseContext } from "@/server/db-context";
 import { stripeCredentialSetReady, stripeTestConfigurationReady } from "@/server/stripe-credentials";
 import { shouldDrainOutboxInline } from "@/server/services/outbox-dispatch";
+import { freeOnlyEnabled } from "@/server/free-only";
+export { freeOnlyEnabled, assertFreeOnlyPrice } from "@/server/free-only";
 
 export type CheckoutResult = { sessionId: string; url: string | null };
 export type RefundResult = { refundId: string; status: "succeeded" | "pending" | "failed"; failureCode: string | null };
@@ -18,6 +21,7 @@ export interface PaymentService {
 
 export class StubPaymentService implements PaymentService {
   async createCheckout(booking?: Booking) {
+    if (freeOnlyEnabled() && booking?.priceCents && booking.priceCents > 0) throw new AppError("FREE_ONLY_MODE", "Paid bookings are disabled in FREE_ONLY mode.", 403);
     if (booking?.priceCents && booking.priceCents > 0) throw new AppError("PAYMENTS_NOT_CONFIGURED", "Payments are not configured for this event type.", 503);
     return null;
   }
@@ -26,14 +30,17 @@ export class StubPaymentService implements PaymentService {
 }
 
 export function assertPaidBookingsConfigured() {
+  if (freeOnlyEnabled()) throw new AppError("FREE_ONLY_MODE", "Paid event types are disabled in FREE_ONLY mode.", 403);
   if (!stripeTestConfigurationReady()) {
     throw new AppError("PAYMENTS_NOT_CONFIGURED", "Stripe test mode must be configured before publishing a paid event type.", 503);
   }
 }
 
+
 export class StripeTestPaymentService implements PaymentService {
   private readonly stripe: Stripe;
   constructor(secretKey = process.env.STRIPE_SECRET_KEY, stripeClient?: Stripe) {
+    if (freeOnlyEnabled()) throw new AppError("FREE_ONLY_MODE", "Stripe is disabled in FREE_ONLY mode.", 403);
     if (!stripeCredentialSetReady(secretKey, false)) throw new Error("SnagTime only accepts a complete authorized Stripe test-mode credential set.");
     this.stripe = stripeClient ?? new Stripe(secretKey!);
   }
@@ -88,7 +95,7 @@ export function stripeCheckoutReturnUrls(booking: Pick<Booking, "id">, eventType
 }
 
 export function getPaymentService(): PaymentService {
-  return process.env.PAYMENTS_PROVIDER === "stripe" ? new StripeTestPaymentService() : new StubPaymentService();
+  return freeOnlyEnabled() ? new StubPaymentService() : process.env.PAYMENTS_PROVIDER === "stripe" ? new StripeTestPaymentService() : new StubPaymentService();
 }
 
 function providerId(value: string | { id: string } | null | undefined) { return typeof value === "string" ? value : value?.id ?? null; }
@@ -112,6 +119,7 @@ async function resolveCheckoutAuthority(stripe: Stripe, session: Stripe.Checkout
 const refundEventTypes = new Set(["refund.created", "refund.updated", "refund.failed"]);
 
 export async function processStripeWebhook(rawBody: string, signature: string) {
+  if (freeOnlyEnabled()) throw new AppError("FREE_ONLY_MODE", "Stripe webhooks are disabled in FREE_ONLY mode.", 403);
   const secretKey = process.env.STRIPE_SECRET_KEY;
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!stripeCredentialSetReady(secretKey, true) || !webhookSecret) throw new Error("Stripe test webhook credentials are not configured.");
@@ -169,9 +177,13 @@ export async function processStripeWebhook(rawBody: string, signature: string) {
           throw new AppError("INVALID_STRIPE_PAYMENT", "Stripe payment details do not match the booking.", 400);
         }
         if (booking.status === "PENDING_PAYMENT") {
+          // Keep the booking pending until a referenced Blockwise event can
+          // be delivered. Rolling back also allows Stripe to retry safely.
+          if (booking.blockwiseReference && !blockwiseWebhookConfigured()) throw new AppError("BLOCKWISE_WEBHOOK_NOT_CONFIGURED", "This Blockwise booking cannot be confirmed until its signed webhook is configured.", 503);
           await tx.booking.update({ where: { id: booking.id }, data: { stripePaymentStatus: "paid", stripePaymentIntentId: paymentIntentId, stripeChargeId: chargeId, refundStatus: "NOT_REQUIRED", status: "CONFIRMED", mutationVersion: { increment: 1 }, calendarSyncStatus: "PENDING" } });
           await tx.integrationOutbox.upsert({ where: { idempotencyKey: `calendar:create:${booking.id}:paid` }, update: {}, create: { workspaceId: booking.workspaceId, bookingId: booking.id, kind: "CALENDAR_CREATE", idempotencyKey: `calendar:create:${booking.id}:paid` } });
           await enqueueBookingEmail(tx, { ...booking, stripePaymentStatus: "paid", mutationVersion: booking.mutationVersion + 1 }, "BOOKING_CONFIRMED");
+          const blockwise = blockwiseSnapshot(booking); if (blockwise) await enqueueBlockwiseBookingEvent(tx, blockwise, "created");
           completedBookingId = booking.id;
         } else if (booking.status === "CANCELLED") {
           await tx.booking.update({ where: { id: booking.id }, data: { stripePaymentStatus: "paid_after_cancel", stripePaymentIntentId: paymentIntentId, stripeChargeId: chargeId, refundStatus: booking.refundStatus === "REFUNDED" ? "REFUNDED" : "REFUND_PENDING", refundFailureCode: booking.refundStatus === "REFUNDED" ? booking.refundFailureCode : null } });

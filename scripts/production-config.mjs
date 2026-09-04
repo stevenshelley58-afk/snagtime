@@ -1,6 +1,8 @@
 const mode = process.argv[2] || "runtime"; const errors = []; const databaseRole = process.env.DATABASE_ROLE || "app"; const runtimeDatabaseName = databaseRole === "worker" ? "WORKER_DATABASE_URL" : "DATABASE_URL";
-const required = mode === "migration" ? ["DATABASE_URL","DATABASE_PROVIDER"] : [runtimeDatabaseName,"DATABASE_PROVIDER","NEXT_PUBLIC_APP_URL","TOKEN_ENCRYPTION_KEY","EMAIL_TOKEN_SECRET","GOOGLE_CLIENT_ID","GOOGLE_CLIENT_SECRET","STRIPE_SECRET_KEY","BUILD_ID"];
-if (mode !== "migration" && databaseRole === "app") required.push("AUTH_SECRET","BOOKING_CAPABILITY_KEY_ID","BOOKING_CAPABILITY_SECRET","TENANT_CONTEXT_SECRET","RATE_LIMIT_HASH_SECRET","STRIPE_WEBHOOK_SECRET","PROXY_SHARED_SECRET","OPERATOR_HEALTH_SECRET");
+const freeOnly = process.env.FREE_ONLY === "true";
+const required = mode === "migration" ? ["DATABASE_URL","DATABASE_PROVIDER"] : [runtimeDatabaseName,"DATABASE_PROVIDER","NEXT_PUBLIC_APP_URL","TOKEN_ENCRYPTION_KEY","EMAIL_TOKEN_SECRET","GOOGLE_CLIENT_ID","GOOGLE_CLIENT_SECRET","BUILD_ID"];
+if (mode !== "migration" && !freeOnly) required.push("STRIPE_SECRET_KEY");
+if (mode !== "migration" && databaseRole === "app") required.push("AUTH_SECRET","BOOKING_CAPABILITY_KEY_ID","BOOKING_CAPABILITY_SECRET","TENANT_CONTEXT_SECRET","RATE_LIMIT_HASH_SECRET",...(freeOnly ? [] : ["STRIPE_WEBHOOK_SECRET"]),"PROXY_SHARED_SECRET","OPERATOR_HEALTH_SECRET");
 for (const name of required) if (!process.env[name]) errors.push(`${name} is required`);
 if (process.env.DATABASE_PROVIDER !== "postgresql" || !/^postgres(?:ql)?:\/\//.test(process.env[runtimeDatabaseName] || "")) errors.push("role-specific PostgreSQL is required");
 if (!/[?&]sslmode=verify-full(?:&|$)/.test(process.env[runtimeDatabaseName] || "") || !/[?&]sslrootcert=[^&]+/.test(process.env[runtimeDatabaseName] || "")) errors.push("PostgreSQL TLS verification with explicit CA is required");
@@ -18,10 +20,11 @@ if (mode !== "migration") {
   if (!/^[0-9A-Fa-f]{64}$/.test(process.env.TOKEN_ENCRYPTION_KEY || "") || new Set(Buffer.from(process.env.TOKEN_ENCRYPTION_KEY || "", "hex")).size < 16) errors.push("diverse token encryption key required");
   if (process.env.OUTBOX_WORKER_MODE !== "dedicated") errors.push("dedicated worker required");
   if (databaseRole === "app" && process.env.TRUST_PROXY !== "true") errors.push("trusted ingress required");
-  if (process.env.DEMO_MODE === "true" || process.env.EMAIL_PROVIDER !== "smtp" || process.env.CALENDAR_PROVIDER !== "google" || process.env.PAYMENTS_PROVIDER !== "stripe") errors.push("demo/local providers forbidden");
+  if (process.env.DEMO_MODE === "true" || process.env.EMAIL_PROVIDER !== "smtp" || process.env.CALENDAR_PROVIDER !== "google" || (!freeOnly && process.env.PAYMENTS_PROVIDER !== "stripe")) errors.push("demo/local providers forbidden");
   if (!["implicit","starttls"].includes(process.env.SMTP_TLS_MODE || "")) errors.push("TLS SMTP mode required");
   if (!process.env.GOOGLE_CLIENT_ID?.endsWith(".apps.googleusercontent.com") || Buffer.byteLength(process.env.GOOGLE_CLIENT_SECRET || "") < 16) errors.push("Google OAuth configuration incomplete");
-  if (!process.env.STRIPE_SECRET_KEY?.startsWith("sk_test_") || (databaseRole === "app" && !process.env.STRIPE_WEBHOOK_SECRET?.startsWith("whsec_"))) errors.push("Stripe test configuration incomplete");
+  if (!freeOnly && (!process.env.STRIPE_SECRET_KEY?.startsWith("sk_test_") || (databaseRole === "app" && !process.env.STRIPE_WEBHOOK_SECRET?.startsWith("whsec_")))) errors.push("Stripe test configuration incomplete");
+  if (process.env.BLOCKWISE_WEBHOOK_URL && (Buffer.byteLength(process.env.BLOCKWISE_WEBHOOK_SECRET || "") < 32 || !process.env.BLOCKWISE_WEBHOOK_URL.startsWith("https://"))) errors.push("Blockwise webhook requires HTTPS and a strong signing secret");
   const senderDomain = (process.env.EMAIL_SENDER_DOMAIN || "").toLowerCase(); const mailbox = (process.env.EMAIL_FROM || "").match(/<([^<>]+)>$/)?.[1] || process.env.EMAIL_FROM || "";
   if (!process.env.EMAIL_REPLY_TO || !senderDomain || !mailbox.toLowerCase().endsWith(`@${senderDomain}`)) errors.push("system email sender and Reply-To contract incomplete");
 }

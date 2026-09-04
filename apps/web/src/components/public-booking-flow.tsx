@@ -10,6 +10,7 @@ import { foregroundForBackground } from "./brand-contrast";
 import { loadBookingWindowSlots } from "./slot-window";
 import { Icon } from "./icons";
 import { ActionButton, BrandMark, Field } from "./ui";
+import { bookingInvitationFromSearch } from "./booking-invitation";
 
 type Step = "schedule" | "details" | "review";
 type SlotDay = { key: string; weekday: string; day: string; month: string; label: string };
@@ -20,6 +21,7 @@ const fallbackTimeZones = ["UTC", "America/Chicago", "America/New_York", "Americ
 const supportedTimeZones = typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : fallbackTimeZones;
 const timeZones = ["UTC", ...supportedTimeZones.filter((zone) => zone !== "UTC")];
 const publicEventRequests = new Map<string, Promise<EventType>>();
+const FREE_ONLY = process.env.NEXT_PUBLIC_FREE_ONLY === "true";
 
 function loadPublicEvent(slug: string) {
   const existing = publicEventRequests.get(slug);
@@ -97,6 +99,7 @@ export function PublicBookingFlow({ slug }: { slug: string }) {
   const [availabilityNotice, setAvailabilityNotice] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [invitation] = useState(() => typeof window === "undefined" ? "" : bookingInvitationFromSearch(window.location.search));
   const slotFormatters = useMemo<SlotFormatters>(() => ({
     key: new Intl.DateTimeFormat("en-US", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }),
     day: new Intl.DateTimeFormat("en-US", { timeZone: timezone, weekday: "short", month: "short", day: "numeric", year: "numeric" }),
@@ -110,7 +113,9 @@ export function PublicBookingFlow({ slug }: { slug: string }) {
       if (!active) return;
       setEvent(item);
       setLoadingSlots(true);
-      setDuration(item.durations.find((option) => option.isDefault) ?? item.durations[0] ?? null);
+      const durations = FREE_ONLY ? item.durations.filter((option) => !option.price) : item.durations;
+      setEvent({ ...item, durations });
+      setDuration(durations.find((option) => option.isDefault) ?? durations[0] ?? null);
     }).catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : "This booking page is unavailable."); }).finally(() => { if (active) setLoadingEvent(false); });
     return () => { active = false; };
   }, [slug]);
@@ -177,7 +182,7 @@ export function PublicBookingFlow({ slug }: { slug: string }) {
     setSubmitting(true);
     setError("");
     try {
-      const input: CreateBookingInput = { startAt: selectedSlot.start, inviteeName: name.trim(), inviteeEmail: email.trim(), inviteeTimeZone: timezone, notes: notes.trim(), durationId: duration.id, answers: event.questions.flatMap((question) => question.id ? [{ questionId: question.id, value: answers[question.id] ?? "" }] : []) };
+      const input: CreateBookingInput = { startAt: selectedSlot.start, inviteeName: name.trim(), inviteeEmail: email.trim(), inviteeTimeZone: timezone, notes: notes.trim(), durationId: duration.id, blockwiseReference: invitation || undefined, answers: event.questions.flatMap((question) => question.id ? [{ questionId: question.id, value: answers[question.id] ?? "" }] : []) };
       const attempt = await getBookingAttempt(slug, input);
       const result = await frontendApi.createBooking(slug, input, attempt.key);
       rememberBookingAttempt(slug, result.bookingId);

@@ -13,6 +13,9 @@ import { processBookingOutbox } from "@/server/services/outbox";
 import { shouldDrainOutboxInline } from "@/server/services/outbox-dispatch";
 import { getPaymentService, type PaymentService } from "@/server/services/payments";
 import { enqueueBookingEmail } from "@/server/services/notifications";
+import { blockwiseSnapshot, enqueueBlockwiseBookingEvent } from "@/server/services/blockwise-events";
+import { blockwiseWebhookConfigured } from "@/server/services/blockwise-events";
+import { assertFreeOnlyPrice } from "@/server/free-only";
 import { boundedPrismaTransactionOptions, withDatabaseTransactionRetry } from "@/server/database-retry";
 
 const activeStatuses = ["CONFIRMED", "PENDING_PAYMENT"];
@@ -31,14 +34,14 @@ export async function getBookingForHost(workspaceId: string, id: string) {
   return mapBooking(booking);
 }
 
-export async function getBookingDetail(id: string) {
-  const booking = await db.booking.findUnique({ where: { id }, include: bookingInclude });
+export async function getBookingDetail(id: string, workspaceId?: string) {
+  const booking = await db.booking.findFirst({ where: { id, ...(workspaceId ? { workspaceId } : {}) }, include: bookingInclude });
   if (!booking) throw notFound("Booking");
   return mapBooking(booking);
 }
 
-export async function listManageRescheduleSlots(id: string, from: Date, to: Date, outputTimeZone: string, durationId?: string, calendar: CalendarService = getCalendarService()) {
-  const booking = await db.booking.findUnique({ where: { id }, include: { eventType: { select: { slug: true } } } });
+export async function listManageRescheduleSlots(id: string, from: Date, to: Date, outputTimeZone: string, durationId?: string, calendar: CalendarService = getCalendarService(), workspaceId?: string) {
+  const booking = await db.booking.findFirst({ where: { id, ...(workspaceId ? { workspaceId } : {}) }, include: { eventType: { select: { slug: true } } } });
   if (!booking || booking.status !== "CONFIRMED") throw notFound("Booking");
   if (booking.calendarProviderSnapshot === "provider_recovery_required") throw new AppError("CALENDAR_PROVIDER_RECOVERY_REQUIRED", "Reconcile this upgraded booking's calendar provider before rescheduling.", 503);
   const providerEventId = booking.externalCalendarEventId ?? (booking.calendarProviderSnapshot === "google" ? providerCalendarEventId(booking.id) : undefined);
@@ -132,8 +135,10 @@ export async function createBooking(
     }
     return prior;
   }
+  if (input.blockwiseReference && !blockwiseWebhookConfigured()) throw new AppError("BLOCKWISE_WEBHOOK_NOT_CONFIGURED", "This Blockwise booking cannot be accepted until its signed webhook is configured.", 503);
   const duration = input.durationId ? eventType.durations.find((item) => item.id === input.durationId) : eventType.durations.find((item) => item.isDefault);
   if (!duration) throw notFound("Duration option");
+  assertFreeOnlyPrice(duration.priceCents);
   const answerMap = new Map((input.answers ?? []).map((answer) => [answer.questionId, answer.value]));
   for (const question of eventType.questions) {
     const value = answerMap.get(question.id);
@@ -163,6 +168,7 @@ export async function createBooking(
         bufferBeforeMinutes: eventType.bufferBeforeMinutes, bufferAfterMinutes: eventType.bufferAfterMinutes,
         bookingWindowDays: eventType.bookingWindowDays,
         inviteeName: input.inviteeName, inviteeEmail: input.inviteeEmail, inviteeTimeZone: input.inviteeTimeZone,
+        blockwiseReference: input.blockwiseReference || null,
         startAt: requestedStart, endAt: requestedEnd, notes: input.notes || null,
         eventTitleSnapshot: eventType.name, locationTypeSnapshot: eventType.locationType,
         locationValueSnapshot: eventType.locationValue, calendarProviderSnapshot,
@@ -178,6 +184,7 @@ export async function createBooking(
       if (!duration.priceCents) {
         await tx.integrationOutbox.create({ data: { workspaceId: eventType.workspaceId, bookingId: booking.id, kind: "CALENDAR_CREATE", idempotencyKey: `calendar:create:${booking.id}:free` } });
         await enqueueBookingEmail(tx, booking, "BOOKING_CONFIRMED");
+        const blockwise = blockwiseSnapshot(booking); if (blockwise) await enqueueBlockwiseBookingEvent(tx, blockwise, "created");
       }
       return tx.booking.findUniqueOrThrow({ where: { id: booking.id }, include: bookingInclude });
     }, boundedPrismaTransactionOptions(remainingMs)));
@@ -217,11 +224,12 @@ export async function resumeBookingCheckout(id: string, payments: PaymentService
   return { bookingId: booking.id, status: "PENDING_PAYMENT", checkoutState: "RETRY_REQUIRED", checkoutUrl: null };
 }
 
-export async function cancelBooking(id: string, cancellationReason?: string) {
+export async function cancelBooking(id: string, cancellationReason?: string, workspaceId?: string) {
   enterDatabaseAction("booking_write");
-  const current = await db.booking.findUnique({ where: { id }, include: bookingInclude });
+  const current = await db.booking.findFirst({ where: { id, ...(workspaceId ? { workspaceId } : {}) }, include: bookingInclude });
   if (!current) throw notFound("Booking");
   if (current.status === "CANCELLED") return mapBooking(current);
+  if (current.blockwiseReference && !blockwiseWebhookConfigured()) throw new AppError("BLOCKWISE_WEBHOOK_NOT_CONFIGURED", "This Blockwise booking cannot be changed until its signed webhook is configured.", 503);
   const updated = await db.$transaction(async (tx) => {
     const mutationNow = new Date();
     const won = await tx.booking.updateMany({ where: { id, mutationVersion: current.mutationVersion, status: { not: "CANCELLED" }, OR: [{ calendarLeaseToken: null }, { calendarLeaseExpiresAt: { lte: mutationNow } }] }, data: { status: "CANCELLED", mutationVersion: { increment: 1 }, calendarLeaseToken: null, calendarLeaseExpiresAt: null, cancellationReason: cancellationReason?.trim() || "INVITEE_CANCELLED", calendarSyncStatus: "PENDING", notificationStatus: "PENDING" } });
@@ -237,20 +245,23 @@ export async function cancelBooking(id: string, cancellationReason?: string) {
       await tx.integrationOutbox.upsert({ where: { idempotencyKey: `stripe:refund:${id}:full:v1` }, update: {}, create: { workspaceId: result.workspaceId, bookingId: id, kind: "STRIPE_REFUND", idempotencyKey: `stripe:refund:${id}:full:v1` } });
     } else if (result.stripeCheckoutSessionId) await tx.integrationOutbox.upsert({ where: { idempotencyKey: `stripe:expire:${id}` }, update: {}, create: { workspaceId: result.workspaceId, bookingId: id, kind: "STRIPE_EXPIRE", idempotencyKey: `stripe:expire:${id}` } });
     const finalResult = await tx.booking.findUniqueOrThrow({ where: { id }, include: bookingInclude });
-    await enqueueBookingEmail(tx, finalResult, "BOOKING_CANCELLED", mutationNow); return finalResult;
+    await enqueueBookingEmail(tx, finalResult, "BOOKING_CANCELLED", mutationNow);
+    const blockwise = blockwiseSnapshot(finalResult); if (blockwise) await enqueueBlockwiseBookingEvent(tx, blockwise, "cancelled", mutationNow);
+    return finalResult;
   });
   if (shouldDrainOutboxInline()) await processBookingOutbox(id);
   return mapBooking(updated);
 }
 
-export async function rescheduleBooking(id: string, startAt: string, calendar: CalendarService = getCalendarService()) {
+export async function rescheduleBooking(id: string, startAt: string, calendar: CalendarService = getCalendarService(), workspaceId?: string) {
   enterDatabaseAction("booking_write");
   const mutationContext = currentDatabaseContext();
-  const booking = await db.booking.findUnique({ where: { id }, include: { eventType: { include: { durations: true, questions: true } }, host: true } });
+  const booking = await db.booking.findFirst({ where: { id, ...(workspaceId ? { workspaceId } : {}) }, include: { eventType: { include: { durations: true, questions: true } }, host: true } });
   if (!booking || booking.status !== "CONFIRMED") throw notFound("Booking");
   if (booking.calendarProviderSnapshot === "provider_recovery_required") throw new AppError("CALENDAR_PROVIDER_RECOVERY_REQUIRED", "Reconcile this upgraded booking's calendar provider before rescheduling.", 503);
   const requestedStart = new Date(startAt);
   if (requestedStart.getTime() === booking.startAt.getTime()) return mapBooking(await db.booking.findUniqueOrThrow({ where: { id }, include: bookingInclude }));
+  if (booking.blockwiseReference && !blockwiseWebhookConfigured()) throw new AppError("BLOCKWISE_WEBHOOK_NOT_CONFIGURED", "This Blockwise booking cannot be changed until its signed webhook is configured.", 503);
   const requestedEnd = DateTime.fromJSDate(requestedStart).plus({ minutes: booking.durationMinutes }).toJSDate();
   const renewedManageExpiry = new Date(requestedEnd.getTime() + 30 * 24 * 60 * 60 * 1000);
   const rangeStart = DateTime.fromJSDate(requestedStart).startOf("day").minus({ hours: 14 }).toJSDate();
@@ -270,7 +281,9 @@ export async function rescheduleBooking(id: string, startAt: string, calendar: C
       await tx.bookingManageSession.updateMany({ where: { bookingId: id, revokedAt: null }, data: { expiresAt: renewedManageExpiry } });
       await tx.integrationOutbox.create({ data: { workspaceId: booking.workspaceId, bookingId: id, kind: "CALENDAR_UPDATE", bookingMutationVersion: booking.mutationVersion + 1, idempotencyKey: `calendar:update:${id}:${requestedStart.toISOString()}` } });
       const result = await tx.booking.findUniqueOrThrow({ where: { id }, include: bookingInclude });
-      await enqueueBookingEmail(tx, result, "BOOKING_RESCHEDULED", mutationNow); return result;
+      await enqueueBookingEmail(tx, result, "BOOKING_RESCHEDULED", mutationNow);
+      const blockwise = blockwiseSnapshot(result); if (blockwise) await enqueueBlockwiseBookingEvent(tx, blockwise, "rescheduled", mutationNow);
+      return result;
     });
   } catch (error) {
     if (providerErrorCode(error) === "P2002") throw conflict("That time was just booked. Choose another slot.");

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { db } from "@/server/db";
 import { clearGoogleScopeHealthCache, getGoogleScopeHealth } from "@/server/services/calendar";
 import { updateEventType } from "@/server/services/event-types";
@@ -50,5 +50,16 @@ describe("event duration lifecycle", () => {
     await expect(updateEventType(workspaceId, owner.id, event.id, { locationType: "GOOGLE_MEET" })).resolves.toMatchObject({ locationType: "GOOGLE_MEET" });
     clearGoogleScopeHealthCache(workspaceId); delete process.env.CALENDAR_PROVIDER; delete process.env.GOOGLE_CLIENT_ID; delete process.env.GOOGLE_CLIENT_SECRET; delete process.env.GOOGLE_REFRESH_TOKEN; delete process.env.GOOGLE_ENV_WORKSPACE_ID; delete process.env.DEMO_MODE;
     await db.booking.delete({ where: { id: booking.id } }); await db.eventType.delete({ where: { id: event.id } });
+  });
+
+  it("allows FREE_ONLY to unpublish an existing paid link but blocks republishing it", async () => {
+    const owner = await db.user.findFirstOrThrow({ include: { memberships: { where: { status: "ACTIVE" }, take: 1 } } });
+    const workspaceId = owner.memberships[0]!.workspaceId;
+    const event = await db.eventType.create({ data: { workspaceId, ownerId: owner.id, name: "Paid free-only gate", slug: `free-only-${randomUUID()}`, locationType: "CUSTOM", isActive: true, durations: { create: { label: "Paid", durationMinutes: 30, isDefault: true, priceCents: 1500, currency: "usd" } } }, include: { durations: true } });
+    vi.stubEnv("FREE_ONLY", "true");
+    await expect(updateEventType(workspaceId, owner.id, event.id, { isActive: false })).resolves.toMatchObject({ isActive: false });
+    await expect(updateEventType(workspaceId, owner.id, event.id, { isActive: true })).rejects.toThrow(/FREE_ONLY/);
+    vi.unstubAllEnvs();
+    await db.eventType.delete({ where: { id: event.id } });
   });
 });

@@ -13,6 +13,7 @@ export async function GET(request: Request, context: Context) {
     await enforceRateLimit(`manage-attempt:ip:${clientAddress(request)}`,240,60_000);
     const { id } = await context.params;
     const organizer = await getSessionRecord(request);
+    const workspaceId = organizer?.activeWorkspaceId;
     const authorityKey = organizer ? (await getBookingForHost(organizer.activeWorkspaceId, id), `organizer:${organizer.id}`) : `manage:${id}:${(await requireBookingManageSession(request, id, "reschedule")).id}`;
     await enforceRateLimit(`manage-slots:${authorityKey}`, 240, 60_000);
     const url = new URL(request.url); const timeZone = url.searchParams.get("timeZone") || "UTC";
@@ -20,6 +21,6 @@ export async function GET(request: Request, context: Context) {
     const from = DateTime.fromISO(url.searchParams.get("from") || "", { zone: "utc" });
     const to = DateTime.fromISO(url.searchParams.get("to") || "", { zone: "utc" });
     if (!from.isValid || !to.isValid || to <= from || to.diff(from, "days").days > 31) throw new AppError("INVALID_SLOT_RANGE", "Choose a valid slot range of no more than 31 days.", 400);
-    return ok(await listManageRescheduleSlots(id, from.toJSDate(), to.toJSDate(), timeZone, url.searchParams.get("durationId") || undefined));
+    return ok(await listManageRescheduleSlots(id, from.toJSDate(), to.toJSDate(), timeZone, url.searchParams.get("durationId") || undefined, undefined, workspaceId));
   } catch (error) { return apiError(error); }
 }

@@ -2,7 +2,7 @@ import type { CreateEventTypeInput, UpdateEventTypeInput } from "@/lib/contracts
 import { db } from "@/server/db";
 import { conflict, notFound } from "@/server/errors";
 import { mapEventType } from "@/server/mappers";
-import { assertPaidBookingsConfigured } from "@/server/services/payments";
+import { assertPaidBookingsConfigured, assertFreeOnlyPrice } from "@/server/services/payments";
 import { googleCalendarReady } from "@/server/services/calendar";
 import { enterDatabaseAction, enterPublicDatabaseContext } from "@/server/db-context";
 
@@ -51,12 +51,13 @@ async function assertLocationReady(workspaceId: string, ownerId: string, locatio
 }
 
 export async function createEventType(workspaceId: string, ownerId: string, input: CreateEventTypeInput) {
-  enterDatabaseAction("event_write");
+  enterDatabaseAction("event_write", { workspaceId, userId: ownerId });
   if (await db.eventType.findUnique({ where: { slug: input.slug } })) throw conflict("That booking link is already in use.");
   const durations = normalizedDurations(input).map((item) => ({
     label: item.label, durationMinutes: item.durationMinutes, isDefault: item.isDefault,
     priceCents: item.priceCents, currency: item.currency, position: item.position,
   }));
+  durations.forEach((duration) => assertFreeOnlyPrice(duration.priceCents));
   if (input.isActive && durations.some((item) => item.priceCents > 0)) assertPaidBookingsConfigured();
   await assertLocationReady(workspaceId, ownerId, input.locationType, input.isActive);
   const { durations: ignoredDurations, questions, ...eventData } = input;
@@ -70,11 +71,14 @@ export async function createEventType(workspaceId: string, ownerId: string, inpu
 }
 
 export async function updateEventType(workspaceId: string, _actingUserId: string, id: string, input: UpdateEventTypeInput, readiness: CalendarReadiness = googleCalendarReady) {
-  enterDatabaseAction("event_write");
+  enterDatabaseAction("event_write", { workspaceId, userId: _actingUserId });
   const current = await db.eventType.findFirst({ where: { id, workspaceId }, include: includeOptions });
   if (!current) throw notFound("Event type");
   if (input.slug && input.slug !== current.slug && await db.eventType.findUnique({ where: { slug: input.slug } })) throw conflict("That booking link is already in use.");
   const candidateDurations = input.durations ?? current.durations;
+  // FREE_ONLY may safely deactivate an existing paid link, but must not
+  // create or edit paid duration behavior (even while the link is inactive).
+  if ((input.isActive ?? current.isActive) || input.durations) candidateDurations.forEach((duration) => assertFreeOnlyPrice(duration.priceCents));
   if ((input.isActive ?? current.isActive) && candidateDurations.some((item) => item.priceCents > 0)) assertPaidBookingsConfigured();
   await assertLocationReady(workspaceId, current.ownerId, input.locationType ?? current.locationType, input.isActive ?? current.isActive, readiness);
   const { durations, questions, ...eventData } = input;
@@ -106,8 +110,8 @@ export async function updateEventType(workspaceId: string, _actingUserId: string
   }));
 }
 
-export async function deleteEventType(workspaceId: string, id: string) {
-  enterDatabaseAction("event_write");
+export async function deleteEventType(workspaceId: string, id: string, userId?: string) {
+  enterDatabaseAction("event_write", { workspaceId, userId });
   const current = await db.eventType.findFirst({ where: { id, workspaceId } });
   if (!current) throw notFound("Event type");
   if (await db.booking.count({ where: { eventTypeId: id } })) await db.eventType.update({ where: { id }, data: { isActive: false } });

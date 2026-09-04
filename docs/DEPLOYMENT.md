@@ -28,7 +28,7 @@ A Linux VPS with Docker is the most direct fit. Container platforms can also wor
 | Secrets | Ignored `.env.local` | Secret manager or mounted secret files |
 | Calendar | Local or Google | Google |
 | Email | Local inbox or SMTP | TLS SMTP |
-| Payments | Stub or Stripe test | Stripe test only |
+| Payments | Stub or Stripe test | Stripe test only, or `FREE_ONLY=true` with no Stripe |
 
 Do not expose the local demo configuration to the public internet.
 
@@ -108,7 +108,9 @@ Required application secrets include:
 - `RATE_LIMIT_HASH_SECRET`
 - `PROXY_SHARED_SECRET`
 - `OPERATOR_HEALTH_SECRET`
-- Provider secrets for Google, Stripe test mode, and SMTP
+- Provider secrets for Google and SMTP; Stripe test secrets are required unless
+  `FREE_ONLY=true`. If Blockwise lifecycle delivery is enabled, also mount the
+  generated `BLOCKWISE_WEBHOOK_SECRET` and set its HTTPS destination URL.
 
 Every secret must be independent. Store them in the platform's secret manager or mount them as files. Never bake them into an image.
 
@@ -133,6 +135,8 @@ Run the migration image with the migration database URL first. Then run two copi
 
 Use `compose.production.yml` to see the required environment split and secret mounts for each service. The file deliberately declares secrets as external, so your orchestration layer must create them before startup.
 
+For a deployment that must never provision or mount payment-provider credentials, use the self-contained `compose.free-only.yml` contract. It sets `FREE_ONLY=true`, uses local calendar and stub payments, and intentionally has no payment-provider secret declarations. Validate it with `docker compose -f compose.free-only.yml config`.
+
 ### 6. Configure providers
 
 Follow [Integration setup](INTEGRATION-SETUP.md). The hosted callbacks use the final HTTPS origin.
@@ -147,7 +151,8 @@ At minimum:
 4. Connect Google Calendar and verify free/busy blocking.
 5. Create, reschedule, and cancel a free booking.
 6. Confirm organizer and invitee SMTP delivery from unrelated mailboxes.
-7. Complete and refund a Stripe test booking.
+7. Complete and refund a Stripe test booking, or verify that free-only mode
+   rejects every paid event and does not require Stripe.
 8. Restart web and worker containers and verify data remains intact.
 9. Run an encrypted backup and restore it into an isolated empty database.
 

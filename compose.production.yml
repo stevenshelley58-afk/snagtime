@@ -22,6 +22,8 @@ services:
       DATABASE_PROVIDER: postgresql
       DATABASE_URL_FILE: /run/secrets/migration_database_url
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?set canonical HTTPS origin}
+      FREE_ONLY: ${FREE_ONLY:-false}
+      NEXT_PUBLIC_FREE_ONLY: ${FREE_ONLY:-false}
     secrets: [migration_database_url,postgres_ca_cert]
     depends_on: { postgres: { condition: service_healthy } }
     read_only: true
@@ -29,13 +31,15 @@ services:
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
   web:
-    build: { context: ., target: runtime, args: { BUILD_ID: "${BUILD_ID:?set immutable build identity}" } }
+    build: { context: ., target: runtime, args: { BUILD_ID: "${BUILD_ID:?set immutable build identity}", NEXT_PUBLIC_FREE_ONLY: "${FREE_ONLY:-false}" } }
     command: ["node","apps/web/server.js"]
     environment: &app_env
       NODE_ENV: production
       DATABASE_PROVIDER: postgresql
       DATABASE_URL_FILE: /run/secrets/app_database_url
       DATABASE_ROLE: app
+      FREE_ONLY: ${FREE_ONLY:-false}
+      NEXT_PUBLIC_FREE_ONLY: ${FREE_ONLY:-false}
       AUTH_SECRET_FILE: /run/secrets/auth_secret
       BOOKING_CAPABILITY_KEY_ID: ${BOOKING_CAPABILITY_KEY_ID:?set booking capability key id}
       BOOKING_CAPABILITY_SECRET_FILE: /run/secrets/booking_capability_secret
@@ -55,7 +59,7 @@ services:
       DEMO_MODE: "false"
       EMAIL_PROVIDER: smtp
       CALENDAR_PROVIDER: google
-      PAYMENTS_PROVIDER: stripe
+      PAYMENTS_PROVIDER: ${PAYMENTS_PROVIDER:-stripe}
       BUILD_ID: ${BUILD_ID:?set immutable build identity}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?set Google client id}
       GOOGLE_CLIENT_SECRET_FILE: /run/secrets/google_client_secret
@@ -69,7 +73,9 @@ services:
       EMAIL_FROM: ${EMAIL_FROM:?set sender}
       EMAIL_REPLY_TO: ${EMAIL_REPLY_TO:?set system reply address}
       EMAIL_SENDER_DOMAIN: ${EMAIL_SENDER_DOMAIN:?set authorized sender domain}
-    secrets: [app_database_url,postgres_ca_cert,auth_secret,booking_capability_secret,booking_capability_keyring,token_encryption_key,email_token_secret,tenant_context_secret,rate_limit_hash_secret,proxy_shared_secret,operator_health_secret,google_client_secret,stripe_secret_key,stripe_webhook_secret,smtp_password]
+      BLOCKWISE_WEBHOOK_URL: ${BLOCKWISE_WEBHOOK_URL:-}
+      BLOCKWISE_WEBHOOK_SECRET_FILE: /run/secrets/blockwise_webhook_secret
+    secrets: [app_database_url,postgres_ca_cert,auth_secret,booking_capability_secret,booking_capability_keyring,token_encryption_key,email_token_secret,tenant_context_secret,rate_limit_hash_secret,proxy_shared_secret,operator_health_secret,google_client_secret,stripe_secret_key,stripe_webhook_secret,blockwise_webhook_secret,smtp_password]
     depends_on: { postgres: { condition: service_healthy } }
     read_only: true
     tmpfs: [/tmp]
@@ -80,7 +86,7 @@ services:
     healthcheck: { test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"], interval: 15s, timeout: 4s, retries: 6 }
     deploy: { resources: { limits: { cpus: "1", memory: 768M } } }
   worker:
-    build: { context: ., target: runtime, args: { BUILD_ID: "${BUILD_ID:?set immutable build identity}" } }
+    build: { context: ., target: runtime, args: { BUILD_ID: "${BUILD_ID:?set immutable build identity}", NEXT_PUBLIC_FREE_ONLY: "${FREE_ONLY:-false}" } }
     command: ["node","dist/worker.mjs"]
     environment:
       NODE_ENV: production
@@ -95,7 +101,7 @@ services:
       DEMO_MODE: "false"
       EMAIL_PROVIDER: smtp
       CALENDAR_PROVIDER: google
-      PAYMENTS_PROVIDER: stripe
+      PAYMENTS_PROVIDER: ${PAYMENTS_PROVIDER:-stripe}
       BUILD_ID: ${BUILD_ID:?set immutable build identity}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?set Google client id}
       GOOGLE_CLIENT_SECRET_FILE: /run/secrets/google_client_secret
@@ -108,7 +114,11 @@ services:
       EMAIL_FROM: ${EMAIL_FROM:?set sender}
       EMAIL_REPLY_TO: ${EMAIL_REPLY_TO:?set system reply address}
       EMAIL_SENDER_DOMAIN: ${EMAIL_SENDER_DOMAIN:?set authorized sender domain}
-    secrets: [worker_database_url,postgres_ca_cert,token_encryption_key,email_token_secret,google_client_secret,stripe_secret_key,smtp_password]
+      FREE_ONLY: ${FREE_ONLY:-false}
+      NEXT_PUBLIC_FREE_ONLY: ${FREE_ONLY:-false}
+      BLOCKWISE_WEBHOOK_URL: ${BLOCKWISE_WEBHOOK_URL:-}
+      BLOCKWISE_WEBHOOK_SECRET_FILE: /run/secrets/blockwise_webhook_secret
+    secrets: [worker_database_url,postgres_ca_cert,token_encryption_key,email_token_secret,google_client_secret,stripe_secret_key,smtp_password,blockwise_webhook_secret]
     depends_on: { postgres: { condition: service_healthy } }
     read_only: true
     tmpfs: [/tmp]
@@ -135,6 +145,7 @@ secrets:
   stripe_secret_key: { external: true }
   stripe_webhook_secret: { external: true }
   smtp_password: { external: true }
+  blockwise_webhook_secret: { external: true }
   postgres_server_cert: { external: true }
   postgres_server_key: { external: true }
   postgres_ca_cert: { external: true }

@@ -250,6 +250,7 @@ model Booking {
   calendarLeaseExpiresAt  DateTime?
   idempotencyKey          String?
   requestFingerprint      String?
+  blockwiseReference      String?
   capabilityVersion      String    @default("")
   capabilityKeyId        String    @default("legacy-auth-v1")
   manageExpiresAt        DateTime  @default(now())
@@ -338,6 +339,11 @@ model IntegrationOutbox {
   leaseToken     String?
   leaseExpiresAt DateTime?
   bookingMutationVersion Int?
+  eventId         String?   @unique
+  payloadJson     String?
+  destinationUrl  String?
+  signingTimestamp BigInt?
+  signingSignature String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   booking        Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
