@@ -40,8 +40,6 @@ jobs:
       - name: Prepare TLS PostgreSQL and production schema
         env:
           PG_CONTAINER: ${{ job.services.postgres.id }}
-          PG_PORT: ${{ job.services.postgres.ports[5432] }}
-          PG_PASSWORD: ci-only-ephemeral
           DATABASE_URL: postgresql://postgres:ci-only-ephemeral@127.0.0.1:${{ job.services.postgres.ports[5432] }}/snagtime_ci?sslmode=verify-full&sslrootcert=${{ github.workspace }}/ci-certs/ca.crt&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000
           WORKER_DATABASE_URL: postgresql://tempocove_worker_login:CI-Worker-Database-Password-0000000001@127.0.0.1:${{ job.services.postgres.ports[5432] }}/snagtime_ci?sslmode=verify-full&sslrootcert=${{ github.workspace }}/ci-certs/ca.crt&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000
           TENANT_CONTEXT_SECRET: ci-tenant-context-secret-00000000000001
@@ -76,7 +74,7 @@ jobs:
             --env TEMPOCOVE_MONITOR_DB_PASSWORD="$TEMPOCOVE_MONITOR_DB_PASSWORD" --env TEMPOCOVE_MIGRATION_DB_PASSWORD="$TEMPOCOVE_MIGRATION_DB_PASSWORD" \
             --env PGAPPNAME="$GITHUB_SHA" \
             node:24.15.0-bookworm-slim@sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d \
-            sh -eu -c 'npm install --ignore-scripts --no-audit --no-fund && npm run db:generate:postgres && npx prisma migrate deploy --schema prisma/postgresql/schema.prisma && npm run db:provision:postgres-logins && node scripts/ci-heartbeat.mjs'
+            sh -eu -c 'npm ci --ignore-scripts --no-audit --no-fund && npm run db:generate:postgres && npx prisma migrate deploy --schema prisma/postgresql/schema.prisma && npm run db:provision:postgres-logins && node scripts/ci-heartbeat.mjs'
         working-directory: ${{ github.workspace }}
 
       - name: Set up BuildKit
@@ -102,39 +100,52 @@ jobs:
         env:
           PG_CONTAINER: ${{ job.services.postgres.id }}
         run: |
+          printf '%s' 'postgresql://tempocove_app_login:CI-App-Database-Password-00000000000001@postgres:5432/snagtime_ci?sslmode=verify-full&sslrootcert=/run/secrets/ci-ca&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000' > ci-certs/DATABASE_URL
+          printf '%s' 'ci-auth-secret-00000000000000000000000000000001' > ci-certs/AUTH_SECRET
+          printf '%s' 'ci-booking-capability-secret-00000000000000000001' > ci-certs/BOOKING_CAPABILITY_SECRET
+          printf '%s' 'ci-rate-limit-hash-secret-0000000000000001' > ci-certs/RATE_LIMIT_HASH_SECRET
+          printf '%s' 'ci-tenant-context-secret-00000000000001' > ci-certs/TENANT_CONTEXT_SECRET
+          printf '%s' '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff' > ci-certs/TOKEN_ENCRYPTION_KEY
+          printf '%s' 'ci-proxy-shared-secret-000000000000001' > ci-certs/PROXY_SHARED_SECRET
+          printf '%s' 'ci-operator-health-secret-00000001' > ci-certs/OPERATOR_HEALTH_SECRET
+          printf '%s' 'ci-google-client-secret-000001' > ci-certs/GOOGLE_CLIENT_SECRET
+          printf '%s' 'sk_test_ci' > ci-certs/STRIPE_SECRET_KEY
+          printf '%s' 'whsec_ci' > ci-certs/STRIPE_WEBHOOK_SECRET
+          printf '%s' 'ci-smtp-password' > ci-certs/SMTP_PASSWORD
+          chmod 600 ci-certs/DATABASE_URL ci-certs/*_SECRET ci-certs/STRIPE_SECRET_KEY ci-certs/STRIPE_WEBHOOK_SECRET ci-certs/SMTP_PASSWORD
           cid=$(docker run -d --network "$(docker inspect "$PG_CONTAINER" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}')" -p 3000:3000 \
             --env NODE_ENV=production \
             --env BUILD_ID=${GITHUB_SHA} \
             --env NEXT_PUBLIC_APP_URL=https://example.invalid/ \
             --env DATABASE_PROVIDER=postgresql \
             --env DATABASE_ROLE=app \
-            --env DATABASE_URL='postgresql://tempocove_app_login:CI-App-Database-Password-00000000000001@postgres:5432/snagtime_ci?sslmode=verify-full&sslrootcert=/run/secrets/ci-ca&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000' \
-            --volume "$GITHUB_WORKSPACE/ci-certs/ca.crt:/run/secrets/ci-ca:ro" \
-            --env AUTH_SECRET=ci-auth-secret-00000000000000000000000000000001 \
+            --env DATABASE_URL_FILE=/run/secrets/DATABASE_URL \
+            --volume "$GITHUB_WORKSPACE/ci-certs:/run/secrets:ro" \
+            --env AUTH_SECRET_FILE=/run/secrets/AUTH_SECRET \
             --env BOOKING_CAPABILITY_KEY_ID=ci-booking-v1 \
-            --env BOOKING_CAPABILITY_SECRET=ci-booking-capability-secret-00000000000000000001 \
+            --env BOOKING_CAPABILITY_SECRET_FILE=/run/secrets/BOOKING_CAPABILITY_SECRET \
             --env RATE_LIMIT_PROVIDER=postgresql \
-            --env RATE_LIMIT_HASH_SECRET=ci-rate-limit-hash-secret-0000000000000001 \
-            --env TENANT_CONTEXT_SECRET=ci-tenant-context-secret-00000000000001 \
-            --env TOKEN_ENCRYPTION_KEY=00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff \
+            --env RATE_LIMIT_HASH_SECRET_FILE=/run/secrets/RATE_LIMIT_HASH_SECRET \
+            --env TENANT_CONTEXT_SECRET_FILE=/run/secrets/TENANT_CONTEXT_SECRET \
+            --env TOKEN_ENCRYPTION_KEY_FILE=/run/secrets/TOKEN_ENCRYPTION_KEY \
             --env OUTBOX_WORKER_MODE=dedicated \
             --env TRUST_PROXY=true \
-            --env PROXY_SHARED_SECRET=ci-proxy-shared-secret-000000000000001 \
-            --env OPERATOR_HEALTH_SECRET=ci-operator-health-secret-00000001 \
+            --env PROXY_SHARED_SECRET_FILE=/run/secrets/PROXY_SHARED_SECRET \
+            --env OPERATOR_HEALTH_SECRET_FILE=/run/secrets/OPERATOR_HEALTH_SECRET \
             --env DEMO_MODE=false \
             --env NEXT_PUBLIC_FREE_ONLY=true \
             --env PAYMENTS_PROVIDER=stripe \
-            --env STRIPE_SECRET_KEY=sk_test_ci \
-            --env STRIPE_WEBHOOK_SECRET=whsec_ci \
+            --env STRIPE_SECRET_KEY_FILE=/run/secrets/STRIPE_SECRET_KEY \
+            --env STRIPE_WEBHOOK_SECRET_FILE=/run/secrets/STRIPE_WEBHOOK_SECRET \
             --env CALENDAR_PROVIDER=google \
             --env GOOGLE_CLIENT_ID=ci-proof.apps.googleusercontent.com \
             --env GOOGLE_CLIENT_SECRET=ci-google-client-secret-000001 \
             --env EMAIL_PROVIDER=smtp \
             --env SMTP_TLS_MODE=starttls \
-            --env SMTP_HOST=smtp.invalid --env SMTP_PORT=465 --env SMTP_USER=ci --env SMTP_PASSWORD=ci-smtp-password \
+            --env SMTP_HOST=smtp.invalid --env SMTP_PORT=465 --env SMTP_USER=ci --env SMTP_PASSWORD_FILE=/run/secrets/SMTP_PASSWORD \
             --env EMAIL_TOKEN_SECRET=ci-email-token-secret-0000000000000001 \
             --env EMAIL_FROM=ci@example.invalid --env EMAIL_REPLY_TO=ci@example.invalid --env EMAIL_SENDER_DOMAIN=example.invalid \
-            --entrypoint node snagtime:${GITHUB_SHA} apps/web/server.js)
+            snagtime:${GITHUB_SHA})
           trap 'docker logs "$cid" || true; docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
           for attempt in $(seq 1 30); do
             if curl --fail --silent --show-error http://127.0.0.1:3000/api/health/live >/dev/null; then break; fi
