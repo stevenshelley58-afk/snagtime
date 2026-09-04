@@ -27,6 +27,11 @@ test("@journey signup, verification, onboarding, scheduling, recovery and tenant
   await page.getByLabel("Workspace name").fill(`Workspace ${suffix}`);
   await page.getByLabel("Workspace timezone").selectOption("America/Chicago");
   await page.getByLabel("Password").fill(accountPassword);
+  // Mobile Chromium can drop the first controlled field while the virtual
+  // keyboard transitions between the signup inputs; fill it last and verify
+  // the value before relying on the form's disabled-state validation.
+  await page.getByLabel("Your name").fill(`Account ${suffix}`);
+  await expect(page.getByLabel("Your name")).toHaveValue(`Account ${suffix}`);
   await page.getByRole("button", { name: "Create workspace" }).click();
   await expect(page.getByRole("heading", { name: "Check for verification instructions" })).toBeVisible();
 
