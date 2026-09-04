@@ -251,6 +251,7 @@ model Booking {
   idempotencyKey          String?
   requestFingerprint      String?
   blockwiseReference      String?
+  blockwiseTenantId       String?
   capabilityVersion      String    @default("")
   capabilityKeyId        String    @default("legacy-auth-v1")
   manageExpiresAt        DateTime  @default(now())
@@ -267,6 +268,7 @@ model Booking {
   manageSessions          BookingManageSession[]
   recoveryTokens          BookingRecoveryToken[]
   emailOutbox             EmailOutbox[]
+  blockwiseBookingActions BlockwiseBookingAction[]
 
   @@index([workspaceId, startAt, endAt])
   @@index([hostId, startAt, endAt])
@@ -525,4 +527,36 @@ model WorkerHeartbeat {
   buildId    String
 
   @@index([lastSeenAt])
+}
+
+/// Private Blockwise operator action reservation. The row is written before
+/// invoking a booking mutation so a lost response cannot cause a blind retry.
+model BlockwiseBookingAction {
+  id                 String   @id @default(cuid())
+  actionId           String   @unique
+  idempotencyKey     String   @unique
+  nonce              String   @unique
+  workspaceId        String
+  bookingId          String
+  action             String
+  expectedVersion    Int
+  requestFingerprint String
+  payloadJson        String
+  reason             String
+  operatorId         String
+  operatorRole       String
+  operatorAal        String
+  status             String   @default("PROCESSING")
+  leaseToken         String?
+  leaseExpiresAt     DateTime?
+  resultJson         String?
+  errorCode          String?
+  expiresAt          DateTime
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  booking            Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([bookingId, createdAt])
+  @@index([status, leaseExpiresAt])
 }

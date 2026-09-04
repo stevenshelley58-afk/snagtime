@@ -6,7 +6,9 @@ import { assertNoClientSecretState, assertNoHorizontalOverflow, attachSession, b
 test.use({ trace: "off" });
 
 async function waitForCalendarSync(bookingId: string) {
-  const deadline = Date.now() + 5_000;
+  // The E2E server polls its isolated outbox every second. Allow a bounded
+  // interval for one poll plus the local provider transaction to settle.
+  const deadline = Date.now() + 10_000;
   do {
     const booking = await db.booking.findUnique({ where: { id: bookingId }, select: { calendarLeaseToken: true, calendarSyncStatus: true } });
     if (booking && booking.calendarLeaseToken === null && booking.calendarSyncStatus !== "PENDING") return;

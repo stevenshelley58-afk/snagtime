@@ -45,6 +45,7 @@ FROM postgres:18.6-bookworm@sha256:7d2695c3aa88e792e8b3b233e7e4adb296a20412c6c0c
 WORKDIR /migrations
 COPY --chown=postgres:postgres prisma/postgresql/migrations/202608220100_production_baseline/migration.sql ./migration.sql
 COPY --chown=postgres:postgres prisma/postgresql/migrations/202609030001_blockwise_events/migration.sql ./blockwise-events.sql
+COPY --chown=postgres:postgres prisma/postgresql/migrations/202609050001_blockwise_booking_actions/migration.sql ./blockwise-booking-actions.sql
 COPY --chown=postgres:postgres scripts/migration-entrypoint.sh ./migration-entrypoint.sh
 USER postgres
 ENTRYPOINT ["/bin/sh","/migrations/migration-entrypoint.sh"]

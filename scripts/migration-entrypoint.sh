@@ -16,4 +16,4 @@ case "$DATABASE_URL" in
   *) echo '{"status":"error","code":"VERIFIED_TLS_REQUIRED"}' >&2; exit 78 ;;
 esac
 
-exec psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f /migrations/migration.sql -f /migrations/blockwise-events.sql
+exec psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f /migrations/migration.sql -f /migrations/blockwise-events.sql -f /migrations/blockwise-booking-actions.sql

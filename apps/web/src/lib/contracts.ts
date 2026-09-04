@@ -77,6 +77,7 @@ export type CreateBookingInput = {
   notes?: string; durationId?: string; answers?: Array<{ questionId: string; value: unknown }>;
   /** Opaque Blockwise invitation/reference; never a workspace identifier. */
   blockwiseReference?: string;
+  blockwiseCapability?: string;
 };
 export type CreateBookingResult = {
   bookingId: string; status: BookingSummary["status"]; checkoutUrl: string | null;

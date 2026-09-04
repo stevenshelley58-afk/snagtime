@@ -17,6 +17,7 @@ import { blockwiseSnapshot, enqueueBlockwiseBookingEvent } from "@/server/servic
 import { blockwiseWebhookConfigured } from "@/server/services/blockwise-events";
 import { assertFreeOnlyPrice } from "@/server/free-only";
 import { boundedPrismaTransactionOptions, withDatabaseTransactionRetry } from "@/server/database-retry";
+import { verifyBlockwiseInvitationCapability } from "@/server/services/blockwise-invitation";
 
 const activeStatuses = ["CONFIRMED", "PENDING_PAYMENT"];
 function providerErrorCode(error: unknown) { return typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code || "") : ""; }
@@ -135,6 +136,10 @@ export async function createBooking(
     }
     return prior;
   }
+  if (input.blockwiseReference && !input.blockwiseCapability) throw new AppError("INVALID_BLOCKWISE_CAPABILITY", "A signed Blockwise invitation capability is required.", 403);
+  if (input.blockwiseCapability && !input.blockwiseReference) throw new AppError("INVALID_BLOCKWISE_CAPABILITY", "Blockwise invitation capability must include its reference.", 403);
+  const blockwiseInvitation = input.blockwiseCapability ? verifyBlockwiseInvitationCapability(input.blockwiseCapability) : null;
+  if (input.blockwiseReference && blockwiseInvitation?.reference !== input.blockwiseReference) throw new AppError("INVALID_BLOCKWISE_CAPABILITY", "Blockwise invitation binding is invalid.", 403);
   if (input.blockwiseReference && !blockwiseWebhookConfigured()) throw new AppError("BLOCKWISE_WEBHOOK_NOT_CONFIGURED", "This Blockwise booking cannot be accepted until its signed webhook is configured.", 503);
   const duration = input.durationId ? eventType.durations.find((item) => item.id === input.durationId) : eventType.durations.find((item) => item.isDefault);
   if (!duration) throw notFound("Duration option");
@@ -169,6 +174,7 @@ export async function createBooking(
         bookingWindowDays: eventType.bookingWindowDays,
         inviteeName: input.inviteeName, inviteeEmail: input.inviteeEmail, inviteeTimeZone: input.inviteeTimeZone,
         blockwiseReference: input.blockwiseReference || null,
+        blockwiseTenantId: blockwiseInvitation?.tenantId || null,
         startAt: requestedStart, endAt: requestedEnd, notes: input.notes || null,
         eventTitleSnapshot: eventType.name, locationTypeSnapshot: eventType.locationType,
         locationValueSnapshot: eventType.locationValue, calendarProviderSnapshot,
@@ -224,7 +230,7 @@ export async function resumeBookingCheckout(id: string, payments: PaymentService
   return { bookingId: booking.id, status: "PENDING_PAYMENT", checkoutState: "RETRY_REQUIRED", checkoutUrl: null };
 }
 
-export async function cancelBooking(id: string, cancellationReason?: string, workspaceId?: string) {
+export async function cancelBooking(id: string, cancellationReason?: string, workspaceId?: string, expectedMutationVersion?: number) {
   enterDatabaseAction("booking_write");
   const current = await db.booking.findFirst({ where: { id, ...(workspaceId ? { workspaceId } : {}) }, include: bookingInclude });
   if (!current) throw notFound("Booking");
@@ -232,12 +238,12 @@ export async function cancelBooking(id: string, cancellationReason?: string, wor
   if (current.blockwiseReference && !blockwiseWebhookConfigured()) throw new AppError("BLOCKWISE_WEBHOOK_NOT_CONFIGURED", "This Blockwise booking cannot be changed until its signed webhook is configured.", 503);
   const updated = await db.$transaction(async (tx) => {
     const mutationNow = new Date();
-    const won = await tx.booking.updateMany({ where: { id, mutationVersion: current.mutationVersion, status: { not: "CANCELLED" }, OR: [{ calendarLeaseToken: null }, { calendarLeaseExpiresAt: { lte: mutationNow } }] }, data: { status: "CANCELLED", mutationVersion: { increment: 1 }, calendarLeaseToken: null, calendarLeaseExpiresAt: null, cancellationReason: cancellationReason?.trim() || "INVITEE_CANCELLED", calendarSyncStatus: "PENDING", notificationStatus: "PENDING" } });
+    const won = await tx.booking.updateMany({ where: { id, mutationVersion: expectedMutationVersion ?? current.mutationVersion, status: { not: "CANCELLED" }, OR: [{ calendarLeaseToken: null }, { calendarLeaseExpiresAt: { lte: mutationNow } }] }, data: { status: "CANCELLED", mutationVersion: { increment: 1 }, calendarLeaseToken: null, calendarLeaseExpiresAt: null, cancellationReason: cancellationReason?.trim() || "INVITEE_CANCELLED", calendarSyncStatus: "PENDING", notificationStatus: "PENDING" } });
     if (won.count !== 1) throw conflict("The booking changed while cancellation was being applied. Refresh and try again.");
     await tx.bookingOccupancy.deleteMany({ where: { bookingId: id } });
     await tx.bookingCapability.updateMany({ where: { bookingId: id, scope: { in: ["cancel", "reschedule"] }, revokedAt: null }, data: { revokedAt: new Date() } });
     await tx.bookingManageSession.updateMany({ where: { bookingId: id, revokedAt: null }, data: { scopes: "read" } });
-    await tx.integrationOutbox.upsert({ where: { idempotencyKey: `calendar:delete:${id}` }, update: {}, create: { workspaceId: current.workspaceId, bookingId: id, kind: "CALENDAR_DELETE", idempotencyKey: `calendar:delete:${id}` } });
+    await tx.integrationOutbox.upsert({ where: { idempotencyKey: `calendar:delete:${id}` }, update: {}, create: { workspaceId: current.workspaceId, bookingId: id, kind: "CALENDAR_DELETE", bookingMutationVersion: current.mutationVersion + 1, idempotencyKey: `calendar:delete:${id}` } });
     const result = await tx.booking.findUniqueOrThrow({ where: { id }, include: bookingInclude });
     if (result.stripePaymentStatus === "paid" || result.stripePaymentStatus === "paid_after_cancel") {
       if (!result.stripePaymentIntentId) throw new Error("STRIPE_REFUND_AUTHORITY_REQUIRED");
@@ -253,7 +259,7 @@ export async function cancelBooking(id: string, cancellationReason?: string, wor
   return mapBooking(updated);
 }
 
-export async function rescheduleBooking(id: string, startAt: string, calendar: CalendarService = getCalendarService(), workspaceId?: string) {
+export async function rescheduleBooking(id: string, startAt: string, calendar: CalendarService = getCalendarService(), workspaceId?: string, expectedMutationVersion?: number) {
   enterDatabaseAction("booking_write");
   const mutationContext = currentDatabaseContext();
   const booking = await db.booking.findFirst({ where: { id, ...(workspaceId ? { workspaceId } : {}) }, include: { eventType: { include: { durations: true, questions: true } }, host: true } });
@@ -274,7 +280,7 @@ export async function rescheduleBooking(id: string, startAt: string, calendar: C
   try {
     updated = await db.$transaction(async (tx) => {
       const mutationNow = new Date();
-      const won = await tx.booking.updateMany({ where: { id, mutationVersion: booking.mutationVersion, status: "CONFIRMED", OR: [{ calendarLeaseToken: null }, { calendarLeaseExpiresAt: { lte: mutationNow } }] }, data: { startAt: requestedStart, endAt: requestedEnd, manageExpiresAt: renewedManageExpiry, mutationVersion: { increment: 1 }, calendarLeaseToken: null, calendarLeaseExpiresAt: null, calendarSyncStatus: "PENDING", notificationStatus: "PENDING" } });
+      const won = await tx.booking.updateMany({ where: { id, mutationVersion: expectedMutationVersion ?? booking.mutationVersion, status: "CONFIRMED", OR: [{ calendarLeaseToken: null }, { calendarLeaseExpiresAt: { lte: mutationNow } }] }, data: { startAt: requestedStart, endAt: requestedEnd, manageExpiresAt: renewedManageExpiry, mutationVersion: { increment: 1 }, calendarLeaseToken: null, calendarLeaseExpiresAt: null, calendarSyncStatus: "PENDING", notificationStatus: "PENDING" } });
       if (won.count !== 1) throw conflict("The booking changed while rescheduling. Refresh and choose a new time.");
       await tx.bookingOccupancy.deleteMany({ where: { bookingId: id } });
       await tx.bookingOccupancy.createMany({ data: occupiedMinutes(requestedStart, requestedEnd, booking.bufferBeforeMinutes, booking.bufferAfterMinutes).map((minuteStart) => ({ workspaceId: booking.workspaceId, bookingId: id, hostId: booking.hostId, minuteStart })) });

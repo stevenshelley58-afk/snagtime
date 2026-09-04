@@ -30,6 +30,10 @@ const env = {
   PAYMENTS_PROVIDER: "stub",
   EMAIL_PROVIDER: "local",
   OUTBOX_WORKER_ENABLED: "true",
+  // Keep the isolated browser harness responsive; production retains its
+  // separately managed worker interval. The journey's bounded sync wait is
+  // intentionally sized around this setting.
+  OUTBOX_POLL_INTERVAL_MS: "1000",
   HOST: "127.0.0.1",
   PORT: port,
   NEXT_DIST_DIR: ".next-playwright",
