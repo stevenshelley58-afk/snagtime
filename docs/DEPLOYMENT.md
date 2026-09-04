@@ -50,11 +50,17 @@ Historical internal identifiers beginning with `tempocove` remain in database ro
 
 ### 1. Prepare a domain and HTTPS ingress
 
-Choose the final origin before configuring providers, for example:
+Choose the final origin before configuring providers. The hosted Blockwise
+service uses:
 
 ```text
-https://book.your-domain.example
+https://book.blockwise.sale
 ```
+
+Set `NEXT_PUBLIC_APP_URL` to that exact HTTPS origin. It is the base for
+booking links, manage links, email recovery links, and provider callbacks; do
+not include a path, query, or fragment. Other deployments should substitute a
+single canonical origin consistently in provider consoles and runtime secrets.
 
 Your reverse proxy must terminate HTTPS, strip any incoming proxy-authentication header from the client, inject the trusted `PROXY_SHARED_SECRET`, and forward requests to the web container.
 
@@ -155,6 +161,41 @@ At minimum:
    rejects every paid event and does not require Stripe.
 8. Restart web and worker containers and verify data remains intact.
 9. Run an encrypted backup and restore it into an isolated empty database.
+
+## Backup and restore commands
+
+Run backups from an operator workstation with the production database URL and
+encryption key supplied through the protected environment. Do not put either
+value in shell history or a committed file:
+
+```powershell
+pwsh -NoProfile -File scripts/backup-postgres.ps1 `
+  -PgDumpPath "C:\Program Files\PostgreSQL\18\bin\pg_dump.exe" `
+  -DatabaseUrlSecret "C:\operator-secrets\snagtime-database-url" `
+  -EncryptionKeySecret "C:\operator-secrets\snagtime-backup-key.b64" `
+  -EncryptedTempDirectory "D:\snagtime-backup-tmp" `
+  -OutputDirectory "D:\snagtime-backups"
+```
+
+For a restore drill, stop writers and restore into an isolated empty
+PostgreSQL database, then run the verification SQL before accepting the
+backup:
+
+```powershell
+pwsh -NoProfile -File scripts/restore-postgres.ps1 `
+  -PgRestorePath "C:\Program Files\PostgreSQL\18\bin\pg_restore.exe" `
+  -PsqlPath "C:\Program Files\PostgreSQL\18\bin\psql.exe" `
+  -TargetDatabaseUrlSecret "C:\operator-secrets\snagtime-isolated-database-url" `
+  -EncryptionKeySecret "C:\operator-secrets\snagtime-backup-key.b64" `
+  -EncryptedTempDirectory "D:\snagtime-restore-tmp" `
+  -BackupPath "D:\snagtime-backups\tempocove-<timestamp>.dump.aesgcm" `
+  -ExpectedSha256 "<recorded SHA-256>" `
+  -ConfirmIsolatedEmptyTarget
+```
+
+The scripts fail closed when TLS or encryption inputs are missing. Keep backup
+artifacts outside the repository and remove temporary restore databases after
+the acceptance drill.
 
 ## Platform notes
 
