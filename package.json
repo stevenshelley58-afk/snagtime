@@ -34,6 +34,7 @@
     "ci:postgres-provision-negative": "node scripts/postgres-provision-negative.mjs",
     "ci:postgres-import-negative": "node scripts/postgres-import-negative.mjs",
     "ci:backup-contract": "node scripts/ci-backup-contract.mjs",
+    "ci:free-only-runtime": "node scripts/free-only-runtime-contract.mjs",
     "ci:postgres-rls": "node scripts/postgres-rls-check.mjs",
     "ci:postgres-app-context": "tsx --tsconfig apps/web/tsconfig.json scripts/postgres-app-context-check.mts",
     "ci:postgres-service-dml": "tsx --tsconfig apps/web/tsconfig.json scripts/postgres-service-dml-check.mts",

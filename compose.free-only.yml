@@ -13,6 +13,22 @@ services:
     secrets: [postgres_owner_password, postgres_server_cert, postgres_server_key, postgres_ca_cert]
     volumes: [postgres_data:/var/lib/postgresql/18/docker]
     healthcheck: { test: ["CMD-SHELL", "pg_isready -U tempocove_owner -d tempocove"], interval: 10s, timeout: 5s, retries: 12 }
+  migration:
+    build: { context: ., target: migration }
+    profiles: [migration]
+    environment:
+      NODE_ENV: production
+      DATABASE_PROVIDER: postgresql
+      DATABASE_URL_FILE: /run/secrets/migration_database_url
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?set canonical HTTPS origin}
+      FREE_ONLY: "true"
+      NEXT_PUBLIC_FREE_ONLY: "true"
+    secrets: [migration_database_url, postgres_ca_cert]
+    depends_on: { postgres: { condition: service_healthy } }
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
   web:
     build: { context: ., target: runtime, args: { BUILD_ID: "${BUILD_ID:?set immutable build identity}", NEXT_PUBLIC_FREE_ONLY: "true" } }
     command: ["node", "apps/web/server.js"]
@@ -40,9 +56,11 @@ services:
       TRUST_PROXY: "true"
       DEMO_MODE: "false"
       EMAIL_PROVIDER: smtp
-      CALENDAR_PROVIDER: local
+      CALENDAR_PROVIDER: google
       PAYMENTS_PROVIDER: stub
       BUILD_ID: ${BUILD_ID:?set immutable build identity}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?set Google client id}
+      GOOGLE_CLIENT_SECRET_FILE: /run/secrets/google_client_secret
       SMTP_HOST: ${SMTP_HOST:?set SMTP host}
       SMTP_PORT: ${SMTP_PORT:?set SMTP port}
       SMTP_TLS_MODE: ${SMTP_TLS_MODE:?set implicit or starttls}
@@ -51,8 +69,12 @@ services:
       EMAIL_FROM: ${EMAIL_FROM:?set sender}
       EMAIL_REPLY_TO: ${EMAIL_REPLY_TO:?set system reply address}
       EMAIL_SENDER_DOMAIN: ${EMAIL_SENDER_DOMAIN:?set authorized sender domain}
-    secrets: [app_database_url, postgres_ca_cert, auth_secret, booking_capability_secret, booking_capability_keyring, token_encryption_key, email_token_secret, tenant_context_secret, rate_limit_hash_secret, proxy_shared_secret, operator_health_secret, smtp_password]
+      BLOCKWISE_WEBHOOK_URL: ${BLOCKWISE_WEBHOOK_URL:-}
+      BLOCKWISE_WEBHOOK_SECRET_FILE: /run/secrets/blockwise_webhook_secret
+    secrets: [app_database_url, postgres_ca_cert, auth_secret, booking_capability_secret, booking_capability_keyring, token_encryption_key, email_token_secret, tenant_context_secret, rate_limit_hash_secret, proxy_shared_secret, operator_health_secret, smtp_password, google_client_secret, blockwise_webhook_secret]
     depends_on: { postgres: { condition: service_healthy } }
+    restart: unless-stopped
+    healthcheck: { test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"], interval: 15s, timeout: 4s, retries: 6 }
   worker:
     build: { context: ., target: runtime, args: { BUILD_ID: "${BUILD_ID:?set immutable build identity}", NEXT_PUBLIC_FREE_ONLY: "true" } }
     command: ["node", "dist/worker.mjs"]
@@ -67,11 +89,13 @@ services:
       OUTBOX_WORKER_MODE: dedicated
       OUTBOX_WORKER_ENABLED: "false"
       EMAIL_PROVIDER: smtp
-      CALENDAR_PROVIDER: local
+      CALENDAR_PROVIDER: google
       PAYMENTS_PROVIDER: stub
       FREE_ONLY: "true"
       NEXT_PUBLIC_FREE_ONLY: "true"
       BUILD_ID: ${BUILD_ID:?set immutable build identity}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?set Google client id}
+      GOOGLE_CLIENT_SECRET_FILE: /run/secrets/google_client_secret
       SMTP_HOST: ${SMTP_HOST:?set SMTP host}
       SMTP_PORT: ${SMTP_PORT:?set SMTP port}
       SMTP_TLS_MODE: ${SMTP_TLS_MODE:?set implicit or starttls}
@@ -80,12 +104,16 @@ services:
       EMAIL_FROM: ${EMAIL_FROM:?set sender}
       EMAIL_REPLY_TO: ${EMAIL_REPLY_TO:?set system reply address}
       EMAIL_SENDER_DOMAIN: ${EMAIL_SENDER_DOMAIN:?set authorized sender domain}
-    secrets: [worker_database_url, postgres_ca_cert, token_encryption_key, email_token_secret, smtp_password]
+      BLOCKWISE_WEBHOOK_URL: ${BLOCKWISE_WEBHOOK_URL:-}
+      BLOCKWISE_WEBHOOK_SECRET_FILE: /run/secrets/blockwise_webhook_secret
+    secrets: [worker_database_url, postgres_ca_cert, token_encryption_key, email_token_secret, smtp_password, google_client_secret, blockwise_webhook_secret]
     depends_on: { postgres: { condition: service_healthy } }
+    restart: unless-stopped
 secrets:
   postgres_owner_password: { external: true }
   app_database_url: { external: true }
   worker_database_url: { external: true }
+  migration_database_url: { external: true }
   postgres_server_cert: { external: true }
   postgres_server_key: { external: true }
   postgres_ca_cert: { external: true }
@@ -99,5 +127,7 @@ secrets:
   proxy_shared_secret: { external: true }
   operator_health_secret: { external: true }
   smtp_password: { external: true }
+  google_client_secret: { external: true }
+  blockwise_webhook_secret: { external: true }
 volumes:
   postgres_data: {}

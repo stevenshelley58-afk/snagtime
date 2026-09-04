@@ -7,6 +7,20 @@ booking creation, Stripe Checkout, Stripe webhooks, and upgrade/payment UI are
 disabled. Existing upstream deployments should leave both values unset or
 `false`.
 
+## Canonical booking URL
+
+The hosted Blockwise service uses `https://book.blockwise.sale` as its
+canonical booking origin. Set this exact value in the runtime environment:
+
+```dotenv
+NEXT_PUBLIC_APP_URL="https://book.blockwise.sale"
+```
+
+This value is the base for public booking links, manage links, email recovery
+links, and the Google OAuth callback. Configure the Google OAuth redirect URI
+as `https://book.blockwise.sale/api/integrations/google/callback`; the origin
+must not include a path, query, or fragment.
+
 ## Signed lifecycle events
 
 When `BLOCKWISE_WEBHOOK_URL` is configured, each committed booking transition
@@ -40,7 +54,6 @@ reference only; a client-supplied workspace identifier is never accepted.
 Run the normal migration before enabling delivery:
 
 ```bash
-npm run db:migrate
 npm run db:migrate:postgres
 ```
 
@@ -57,6 +70,14 @@ web and dedicated worker services are required so the durable outbox drains;
 readiness must include database migration status, worker heartbeat, and the
 age/count of pending or dead `BLOCKWISE_BOOKING_EVENT` rows. Never put the
 secret in a Dockerfile, image layer, `.env` committed to Git, or logs.
+
+The free-only Compose contract wires `BLOCKWISE_WEBHOOK_URL` into both web and
+worker services and mounts the external `blockwise_webhook_secret`. Create
+that runtime secret before startup, then set the HTTPS destination URL:
+
+```bash
+printf '%s' "$(openssl rand -base64 32)" | docker secret create blockwise_webhook_secret -
+```
 
 ## Upstream receipt and attribution
 
