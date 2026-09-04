@@ -137,6 +137,14 @@ function safeResult(receiptId: string, action: BlockwiseBookingActionEnvelope, b
   return { receiptId, actionId: action.actionId, idempotencyKey: action.idempotencyKey, status: "ACCEPTED", calendarStatus: "PENDING", bookingId: booking.id, workspaceId: booking.workspaceId, bookingStatus: booking.status, mutationVersion: booking.mutationVersion, startAt: booking.startAt.toISOString(), endAt: booking.endAt.toISOString() };
 }
 function parseResult(value: string | null): BlockwiseBookingActionResult | null { if (!value) return null; try { const parsed = JSON.parse(value) as BlockwiseBookingActionResult; return parsed?.status === "ACCEPTED" ? parsed : null; } catch { return null; } }
+async function refreshCalendarReceipt(receipt: { id: string; bookingId: string; expectedVersion: number; action: string }, result: BlockwiseBookingActionResult) {
+  const effect = await db.integrationOutbox.findFirst({ where: { bookingId: receipt.bookingId, bookingMutationVersion: receipt.expectedVersion + 1, kind: receipt.action === "booking_cancel" ? "CALENDAR_DELETE" : "CALENDAR_UPDATE" }, orderBy: { createdAt: "desc" } });
+  const calendarStatus = effect?.status === "COMPLETED" && !effect.lastErrorCode ? "SYNCED" : effect?.status === "DEAD" ? "FAILED" : "PENDING";
+  if (calendarStatus === result.calendarStatus) return result;
+  const updated = { ...result, calendarStatus };
+  await db.blockwiseBookingAction.updateMany({ where: { id: receipt.id }, data: { resultJson: JSON.stringify(updated) } });
+  return updated;
+}
 function providerCode(error: unknown) {
   if (error && typeof error === "object" && "code" in error && typeof (error as { code?: unknown }).code === "string") return (error as { code: string }).code;
   return "ACTION_EXECUTION_FAILED";
@@ -173,7 +181,7 @@ export async function executeBlockwiseBookingAction(action: BlockwiseBookingActi
   let receipt = await db.blockwiseBookingAction.findUnique({ where: { idempotencyKey: action.idempotencyKey } });
   if (receipt) {
     if (receipt.workspaceId !== action.workspaceId || receipt.requestFingerprint !== requestFingerprint || receipt.bookingId !== action.target.id || receipt.action !== action.action) throw new AppError("IDEMPOTENCY_KEY_REUSED", "Idempotency key was already used for a different action.", 409);
-    const replay = parseResult(receipt.resultJson); if (receipt.status === "SUCCEEDED" && replay) return replay;
+    const replay = parseResult(receipt.resultJson); if (receipt.status === "SUCCEEDED" && replay) return refreshCalendarReceipt(receipt, replay);
     if (receipt.status !== "PROCESSING") throw new AppError(receipt.errorCode || "ACTION_QUARANTINED", "Action receipt is unavailable.", 409);
     if (receipt.leaseExpiresAt && receipt.leaseExpiresAt > now) throw new AppError("ACTION_IN_PROGRESS", "Action is already being processed.", 409);
     const reconciled = await reconcileExpiredAction(receipt, action, now); if (reconciled) return reconciled;
@@ -208,14 +216,14 @@ export async function executeBlockwiseBookingAction(action: BlockwiseBookingActi
     enterDatabaseAction("blockwise_booking_action");
     const settled = await db.blockwiseBookingAction.updateMany({ where: { id: receipt.id, leaseToken }, data: { status: "SUCCEEDED", resultJson, leaseToken: null, leaseExpiresAt: null, errorCode: null } });
     if (settled.count !== 1) throw new AppError("ACTION_QUARANTINED", "Action requires operator reconciliation before retrying.", 503);
-    return JSON.parse(resultJson) as BlockwiseBookingActionResult;
+    return refreshCalendarReceipt(receipt, JSON.parse(resultJson) as BlockwiseBookingActionResult);
   } catch (error) {
     const finalBooking = await db.booking.findFirst({ where: { id: action.target.id, blockwiseTenantId: action.workspaceId } });
     if (finalBooking && actionApplied(action, finalBooking)) {
       const resultJson = JSON.stringify(safeResult(receipt.id, action, finalBooking));
       enterDatabaseAction("blockwise_booking_action");
       await db.blockwiseBookingAction.updateMany({ where: { id: receipt.id, leaseToken }, data: { status: "SUCCEEDED", resultJson, leaseToken: null, leaseExpiresAt: null, errorCode: null } });
-      return JSON.parse(resultJson) as BlockwiseBookingActionResult;
+      return refreshCalendarReceipt(receipt, JSON.parse(resultJson) as BlockwiseBookingActionResult);
     }
     const code = providerCode(error); enterDatabaseAction("blockwise_booking_action"); await db.blockwiseBookingAction.updateMany({ where: { id: receipt.id, leaseToken }, data: { status: error instanceof AppError ? "REJECTED" : "QUARANTINED", errorCode: code, leaseToken: null, leaseExpiresAt: null } });
     if (error instanceof AppError) throw error;

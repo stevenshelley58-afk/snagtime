@@ -243,7 +243,7 @@ export async function cancelBooking(id: string, cancellationReason?: string, wor
     await tx.bookingOccupancy.deleteMany({ where: { bookingId: id } });
     await tx.bookingCapability.updateMany({ where: { bookingId: id, scope: { in: ["cancel", "reschedule"] }, revokedAt: null }, data: { revokedAt: new Date() } });
     await tx.bookingManageSession.updateMany({ where: { bookingId: id, revokedAt: null }, data: { scopes: "read" } });
-    await tx.integrationOutbox.upsert({ where: { idempotencyKey: `calendar:delete:${id}` }, update: {}, create: { workspaceId: current.workspaceId, bookingId: id, kind: "CALENDAR_DELETE", idempotencyKey: `calendar:delete:${id}` } });
+    await tx.integrationOutbox.upsert({ where: { idempotencyKey: `calendar:delete:${id}` }, update: {}, create: { workspaceId: current.workspaceId, bookingId: id, kind: "CALENDAR_DELETE", bookingMutationVersion: current.mutationVersion + 1, idempotencyKey: `calendar:delete:${id}` } });
     const result = await tx.booking.findUniqueOrThrow({ where: { id }, include: bookingInclude });
     if (result.stripePaymentStatus === "paid" || result.stripePaymentStatus === "paid_after_cancel") {
       if (!result.stripePaymentIntentId) throw new Error("STRIPE_REFUND_AUTHORITY_REQUIRED");

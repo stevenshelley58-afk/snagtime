@@ -21,7 +21,6 @@ CREATE TABLE "BlockwiseBookingAction" (
   "expiresAt" DATETIME NOT NULL,
   "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updatedAt" DATETIME NOT NULL,
-  CONSTRAINT "BlockwiseBookingAction_workspaceId_fkey" FOREIGN KEY ("workspaceId") REFERENCES "Workspace" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT "BlockwiseBookingAction_bookingId_fkey" FOREIGN KEY ("bookingId") REFERENCES "Booking" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 CREATE UNIQUE INDEX "BlockwiseBookingAction_actionId_key" ON "BlockwiseBookingAction"("actionId");
