@@ -41,12 +41,12 @@ jobs:
           PG_PORT: ${{ job.services.postgres.ports[5432] }}
           PG_PASSWORD: ci-only-ephemeral
           DATABASE_URL: postgresql://postgres:ci-only-ephemeral@127.0.0.1:${{ job.services.postgres.ports[5432] }}/snagtime_ci?sslmode=verify-full&sslrootcert=${{ github.workspace }}/ci-certs/ca.crt&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000
-          WORKER_DATABASE_URL: postgresql://tempocove_worker_login:ci-worker-db-password-0000000000000001@127.0.0.1:${{ job.services.postgres.ports[5432] }}/snagtime_ci?sslmode=verify-full&sslrootcert=${{ github.workspace }}/ci-certs/ca.crt&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000
+          WORKER_DATABASE_URL: postgresql://tempocove_worker_login:CI-Worker-Database-Password-0000000001@127.0.0.1:${{ job.services.postgres.ports[5432] }}/snagtime_ci?sslmode=verify-full&sslrootcert=${{ github.workspace }}/ci-certs/ca.crt&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000
           TENANT_CONTEXT_SECRET: ci-tenant-context-secret-00000000000001
-          TEMPOCOVE_APP_DB_PASSWORD: ci-app-db-password-000000000000000001
-          TEMPOCOVE_WORKER_DB_PASSWORD: ci-worker-db-password-0000000000000001
-          TEMPOCOVE_MONITOR_DB_PASSWORD: ci-monitor-db-password-000000000000001
-          TEMPOCOVE_MIGRATION_DB_PASSWORD: ci-migration-db-password-00000000000001
+          TEMPOCOVE_APP_DB_PASSWORD: CI-App-Database-Password-00000000000001
+          TEMPOCOVE_WORKER_DB_PASSWORD: CI-Worker-Database-Password-0000000001
+          TEMPOCOVE_MONITOR_DB_PASSWORD: CI-Monitor-Database-Password-000000001
+          TEMPOCOVE_MIGRATION_DB_PASSWORD: CI-Migration-Database-Password-0000001
         run: |
           set -euo pipefail
           mkdir -p ci-certs
@@ -100,7 +100,7 @@ jobs:
             --env NEXT_PUBLIC_APP_URL=https://example.invalid/ \
             --env DATABASE_PROVIDER=postgresql \
             --env DATABASE_ROLE=app \
-            --env DATABASE_URL='postgresql://tempocove_app_login:ci-app-db-password-000000000000000001@postgres:5432/snagtime_ci?sslmode=verify-full&sslrootcert=/run/secrets/ci-ca&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000' \
+            --env DATABASE_URL='postgresql://tempocove_app_login:CI-App-Database-Password-00000000000001@postgres:5432/snagtime_ci?sslmode=verify-full&sslrootcert=/run/secrets/ci-ca&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000' \
             --volume "$GITHUB_WORKSPACE/ci-certs/ca.crt:/run/secrets/ci-ca:ro" \
             --env AUTH_SECRET=ci-auth-secret-00000000000000000000000000000001 \
             --env BOOKING_CAPABILITY_KEY_ID=ci-booking-v1 \

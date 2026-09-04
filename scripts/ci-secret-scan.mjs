@@ -53,7 +53,7 @@ const forbidden = [
   /\bAKIA[0-9A-Z]{16}\b/,
   /postgres(?:ql)?:\/\/[^\s:/]+:[^\s@]+@/i,
 ]; const findings=[];
-const documentedCiPlaceholders=["ci-only-ephemeral","CI-App-Database-Password-00000000000001","CI-Worker-Database-Password-0000000001","CI-Monitor-Database-Password-000000001","CI-Migration-Database-Password-0000001"];
+const documentedCiPlaceholders=["ci-only-ephemeral","CI-App-Database-Password-00000000000001","CI-Worker-Database-Password-0000000001","CI-Monitor-Database-Password-000000001","CI-Migration-Database-Password-0000001","ci-app-db-password-000000000000000001","ci-worker-db-password-0000000000000001"];
 const sanitizeCiPlaceholders=(value)=>documentedCiPlaceholders.reduce((current,placeholder)=>current.replaceAll(placeholder,""),value);
 const allowedHighEntropy = /(?:sha256|digest|hash|integrity|example|invalid|placeholder|replace-with|test|demo|not-for-production|_key|_idx|000000|\$\{\{|[A-Fa-f0-9]{48,})/i;
 const highEntropyLiteral = /["']([A-Za-z0-9+\/_=-]{48,})["']/g;
