@@ -112,7 +112,15 @@ jobs:
           printf '%s' 'sk_test_ci' > ci-certs/STRIPE_SECRET_KEY
           printf '%s' 'whsec_ci' > ci-certs/STRIPE_WEBHOOK_SECRET
           printf '%s' 'ci-smtp-password' > ci-certs/SMTP_PASSWORD
-          chmod 600 ci-certs/DATABASE_URL ci-certs/*_SECRET ci-certs/STRIPE_SECRET_KEY ci-certs/STRIPE_WEBHOOK_SECRET ci-certs/SMTP_PASSWORD
+          secret_dir="$GITHUB_WORKSPACE/runtime-secrets"
+          mkdir -p "$secret_dir"
+          cp ci-certs/ca.crt "$secret_dir/ci-ca"
+          cp ci-certs/DATABASE_URL ci-certs/AUTH_SECRET ci-certs/BOOKING_CAPABILITY_SECRET ci-certs/RATE_LIMIT_HASH_SECRET ci-certs/TENANT_CONTEXT_SECRET ci-certs/TOKEN_ENCRYPTION_KEY ci-certs/PROXY_SHARED_SECRET ci-certs/OPERATOR_HEALTH_SECRET ci-certs/GOOGLE_CLIENT_SECRET ci-certs/STRIPE_SECRET_KEY ci-certs/STRIPE_WEBHOOK_SECRET ci-certs/SMTP_PASSWORD "$secret_dir/"
+          chown -R 1000:1000 "$secret_dir"
+          chmod 700 "$secret_dir"
+          chmod 400 "$secret_dir"/*
+          docker run --rm --user 1000:1000 --volume "$secret_dir:/run/secrets:ro" snagtime:${GITHUB_SHA} node -e "require('fs').readFileSync('/run/secrets/DATABASE_URL'); require('fs').readFileSync('/run/secrets/AUTH_SECRET')"
+          ! docker run --rm --user 1001:1001 --volume "$secret_dir:/run/secrets:ro" snagtime:${GITHUB_SHA} node -e "require('fs').readFileSync('/run/secrets/DATABASE_URL')"
           cid=$(docker run -d --network "$(docker inspect "$PG_CONTAINER" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}')" -p 3000:3000 \
             --env NODE_ENV=production \
             --env BUILD_ID=${GITHUB_SHA} \
@@ -120,7 +128,7 @@ jobs:
             --env DATABASE_PROVIDER=postgresql \
             --env DATABASE_ROLE=app \
             --env DATABASE_URL_FILE=/run/secrets/DATABASE_URL \
-            --volume "$GITHUB_WORKSPACE/ci-certs:/run/secrets:ro" \
+            --volume "$GITHUB_WORKSPACE/runtime-secrets:/run/secrets:ro" \
             --env AUTH_SECRET_FILE=/run/secrets/AUTH_SECRET \
             --env BOOKING_CAPABILITY_KEY_ID=ci-booking-v1 \
             --env BOOKING_CAPABILITY_SECRET_FILE=/run/secrets/BOOKING_CAPABILITY_SECRET \
