@@ -75,7 +75,7 @@ describe("payment provider boundary", () => {
     await db.booking.create({ data: {
       id: bookingId, workspaceId: eventType.workspaceId, eventTypeId: eventType.id, hostId: eventType.ownerId, durationId: duration.id,
       durationMinutes: duration.durationMinutes, priceCents: 2500, currency: "usd", inviteeName: "Paid Test",
-      inviteeEmail: "paid@example.com", inviteeTimeZone: "UTC", startAt: new Date("2099-03-01T15:00:00Z"), endAt: new Date("2099-03-01T15:30:00Z"),
+      inviteeEmail: "paid@example.com", inviteeTimeZone: "UTC", blockwiseReference: "invite-paid-gate", startAt: new Date("2099-03-01T15:00:00Z"), endAt: new Date("2099-03-01T15:30:00Z"),
       status: "PENDING_PAYMENT", stripeCheckoutSessionId: sessionId, stripePaymentStatus: "unpaid", capabilityVersion: randomUUID(), manageExpiresAt: new Date("2099-04-01T00:00:00Z"),
     } });
     const payload = JSON.stringify({
@@ -83,6 +83,9 @@ describe("payment provider boundary", () => {
       data: { object: { id: sessionId, object: "checkout.session", livemode: false, mode: "payment", status: "complete", client_reference_id: bookingId, payment_status: "paid", payment_intent: { id: `pi_${bookingId}`, latest_charge: `ch_${bookingId}` }, amount_total: 2500, currency: "usd", metadata: { bookingId, eventTypeId: eventType.id, durationId: duration.id } } },
     });
     const signature = Stripe.webhooks.generateTestHeaderString({ payload, secret: "whsec_unit" });
+    await expect(processStripeWebhook(payload, signature)).rejects.toThrow(/BLOCKWISE_WEBHOOK_NOT_CONFIGURED/);
+    expect(await db.booking.findUniqueOrThrow({ where: { id: bookingId } })).toMatchObject({ status: "PENDING_PAYMENT", stripePaymentStatus: "unpaid", stripePaymentIntentId: null });
+    vi.stubEnv("BLOCKWISE_WEBHOOK_URL", "https://blockwise.example/webhook"); vi.stubEnv("BLOCKWISE_WEBHOOK_SECRET", "blockwise-payment-test-secret-with-at-least-32-bytes");
     expect(await processStripeWebhook(payload, signature)).toEqual({ duplicate: false, eventId });
     expect(await processStripeWebhook(payload, signature)).toEqual({ duplicate: true, eventId });
     const collidedPayload = payload.replace('"amount_total":2500', '"amount_total":2501');
