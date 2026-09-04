@@ -33,6 +33,7 @@ const common = {
   GOOGLE_CLIENT_SECRET: "ci-free-only-google-secret-000001",
   BUILD_ID: "0123456789abcdef0123456789abcdef01234567",
   FREE_ONLY: "true",
+  DEMO_MODE: "false",
   RATE_LIMIT_PROVIDER: "postgresql",
   OUTBOX_WORKER_MODE: "dedicated",
   EMAIL_PROVIDER: "smtp",
