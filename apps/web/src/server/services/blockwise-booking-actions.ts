@@ -104,14 +104,14 @@ function secretFromFile() {
     let cursor = resolve(path); const ancestors: string[] = [];
     while (true) { ancestors.push(cursor); const parent = resolve(cursor, ".."); if (parent === cursor) break; cursor = parent; }
     for (const ancestor of ancestors) {
-      const parentInfo = lstatSync(ancestor);
+      const parentInfo = lstatSync(/* turbopackIgnore: true */ ancestor);
       if (parentInfo.isSymbolicLink() || (!parentInfo.isDirectory() && ancestor !== resolve(path))) throw new Error("invalid secret path ancestor");
       if (process.platform !== "win32" && ancestor !== resolve(path) && (parentInfo.mode & 0o022) !== 0) throw new Error("secret directory permissions are too broad");
     }
-    const info = lstatSync(path);
+    const info = lstatSync(/* turbopackIgnore: true */ path);
     if (!info.isFile() || info.isSymbolicLink() || resolve(path) !== path || info.size > 4096) throw new Error("invalid secret file");
     if (process.platform !== "win32" && (info.mode & 0o077) !== 0) throw new Error("secret file permissions are too broad");
-    const secret = readFileSync(path, "utf8").trim();
+    const secret = readFileSync(/* turbopackIgnore: true */ path, "utf8").trim();
     if (Buffer.byteLength(secret) < 32 || /[^\x21-\x7e]/.test(secret)) throw new Error("invalid secret");
     return secret;
   } catch { throw new AppError("ACTION_AUTH_UNAVAILABLE", "Booking action authentication is unavailable.", 503); }
