@@ -228,8 +228,8 @@ export async function cancelBooking(id: string, cancellationReason?: string, wor
   enterDatabaseAction("booking_write");
   const current = await db.booking.findFirst({ where: { id, ...(workspaceId ? { workspaceId } : {}) }, include: bookingInclude });
   if (!current) throw notFound("Booking");
-  if (current.blockwiseReference && !blockwiseWebhookConfigured()) throw new AppError("BLOCKWISE_WEBHOOK_NOT_CONFIGURED", "This Blockwise booking cannot be changed until its signed webhook is configured.", 503);
   if (current.status === "CANCELLED") return mapBooking(current);
+  if (current.blockwiseReference && !blockwiseWebhookConfigured()) throw new AppError("BLOCKWISE_WEBHOOK_NOT_CONFIGURED", "This Blockwise booking cannot be changed until its signed webhook is configured.", 503);
   const updated = await db.$transaction(async (tx) => {
     const mutationNow = new Date();
     const won = await tx.booking.updateMany({ where: { id, mutationVersion: current.mutationVersion, status: { not: "CANCELLED" }, OR: [{ calendarLeaseToken: null }, { calendarLeaseExpiresAt: { lte: mutationNow } }] }, data: { status: "CANCELLED", mutationVersion: { increment: 1 }, calendarLeaseToken: null, calendarLeaseExpiresAt: null, cancellationReason: cancellationReason?.trim() || "INVITEE_CANCELLED", calendarSyncStatus: "PENDING", notificationStatus: "PENDING" } });
@@ -258,10 +258,10 @@ export async function rescheduleBooking(id: string, startAt: string, calendar: C
   const mutationContext = currentDatabaseContext();
   const booking = await db.booking.findFirst({ where: { id, ...(workspaceId ? { workspaceId } : {}) }, include: { eventType: { include: { durations: true, questions: true } }, host: true } });
   if (!booking || booking.status !== "CONFIRMED") throw notFound("Booking");
-  if (booking.blockwiseReference && !blockwiseWebhookConfigured()) throw new AppError("BLOCKWISE_WEBHOOK_NOT_CONFIGURED", "This Blockwise booking cannot be changed until its signed webhook is configured.", 503);
   if (booking.calendarProviderSnapshot === "provider_recovery_required") throw new AppError("CALENDAR_PROVIDER_RECOVERY_REQUIRED", "Reconcile this upgraded booking's calendar provider before rescheduling.", 503);
   const requestedStart = new Date(startAt);
   if (requestedStart.getTime() === booking.startAt.getTime()) return mapBooking(await db.booking.findUniqueOrThrow({ where: { id }, include: bookingInclude }));
+  if (booking.blockwiseReference && !blockwiseWebhookConfigured()) throw new AppError("BLOCKWISE_WEBHOOK_NOT_CONFIGURED", "This Blockwise booking cannot be changed until its signed webhook is configured.", 503);
   const requestedEnd = DateTime.fromJSDate(requestedStart).plus({ minutes: booking.durationMinutes }).toJSDate();
   const renewedManageExpiry = new Date(requestedEnd.getTime() + 30 * 24 * 60 * 60 * 1000);
   const rangeStart = DateTime.fromJSDate(requestedStart).startOf("day").minus({ hours: 14 }).toJSDate();

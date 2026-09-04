@@ -76,7 +76,9 @@ export async function updateEventType(workspaceId: string, _actingUserId: string
   if (!current) throw notFound("Event type");
   if (input.slug && input.slug !== current.slug && await db.eventType.findUnique({ where: { slug: input.slug } })) throw conflict("That booking link is already in use.");
   const candidateDurations = input.durations ?? current.durations;
-  candidateDurations.forEach((duration) => assertFreeOnlyPrice(duration.priceCents));
+  // FREE_ONLY may safely deactivate an existing paid link, but must not
+  // create or edit paid duration behavior (even while the link is inactive).
+  if ((input.isActive ?? current.isActive) || input.durations) candidateDurations.forEach((duration) => assertFreeOnlyPrice(duration.priceCents));
   if ((input.isActive ?? current.isActive) && candidateDurations.some((item) => item.priceCents > 0)) assertPaidBookingsConfigured();
   await assertLocationReady(workspaceId, current.ownerId, input.locationType ?? current.locationType, input.isActive ?? current.isActive, readiness);
   const { durations, questions, ...eventData } = input;

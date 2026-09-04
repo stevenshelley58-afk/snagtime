@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { Prisma, type Booking, type EventType } from "@prisma/client";
 import Stripe from "stripe";
 import { enqueueBookingEmail } from "@/server/services/notifications";
-import { blockwiseSnapshot, enqueueBlockwiseBookingEvent } from "@/server/services/blockwise-events";
+import { blockwiseSnapshot, blockwiseWebhookConfigured, enqueueBlockwiseBookingEvent } from "@/server/services/blockwise-events";
 import { db } from "@/server/db";
 import { AppError } from "@/server/errors";
 import { enterProviderDatabaseContext } from "@/server/db-context";
@@ -177,6 +177,9 @@ export async function processStripeWebhook(rawBody: string, signature: string) {
           throw new AppError("INVALID_STRIPE_PAYMENT", "Stripe payment details do not match the booking.", 400);
         }
         if (booking.status === "PENDING_PAYMENT") {
+          // Keep the booking pending until a referenced Blockwise event can
+          // be delivered. Rolling back also allows Stripe to retry safely.
+          if (booking.blockwiseReference && !blockwiseWebhookConfigured()) throw new AppError("BLOCKWISE_WEBHOOK_NOT_CONFIGURED", "This Blockwise booking cannot be confirmed until its signed webhook is configured.", 503);
           await tx.booking.update({ where: { id: booking.id }, data: { stripePaymentStatus: "paid", stripePaymentIntentId: paymentIntentId, stripeChargeId: chargeId, refundStatus: "NOT_REQUIRED", status: "CONFIRMED", mutationVersion: { increment: 1 }, calendarSyncStatus: "PENDING" } });
           await tx.integrationOutbox.upsert({ where: { idempotencyKey: `calendar:create:${booking.id}:paid` }, update: {}, create: { workspaceId: booking.workspaceId, bookingId: booking.id, kind: "CALENDAR_CREATE", idempotencyKey: `calendar:create:${booking.id}:paid` } });
           await enqueueBookingEmail(tx, { ...booking, stripePaymentStatus: "paid", mutationVersion: booking.mutationVersion + 1 }, "BOOKING_CONFIRMED");

@@ -135,6 +135,8 @@ Run the migration image with the migration database URL first. Then run two copi
 
 Use `compose.production.yml` to see the required environment split and secret mounts for each service. The file deliberately declares secrets as external, so your orchestration layer must create them before startup.
 
+For a deployment that must never provision or mount payment-provider credentials, use the self-contained `compose.free-only.yml` contract. It sets `FREE_ONLY=true`, uses local calendar and stub payments, and intentionally has no payment-provider secret declarations. Validate it with `docker compose -f compose.free-only.yml config`.
+
 ### 6. Configure providers
 
 Follow [Integration setup](INTEGRATION-SETUP.md). The hosted callbacks use the final HTTPS origin.
