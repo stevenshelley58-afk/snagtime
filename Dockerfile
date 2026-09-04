@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM node:24.15.0-bookworm-slim@sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d AS deps
+FROM node:24.19.0-bookworm-slim@sha256:e5a8dee7bc1e6a215d224a7ef8206f7e77271bc3cabd5febf2beafac0674f174 AS deps
 WORKDIR /src
 COPY package.json package-lock.json ./
 COPY apps/web/package.json apps/web/package.json
@@ -20,7 +20,7 @@ RUN npm prune --omit=dev --ignore-scripts \
  && rm -rf node_modules/prisma node_modules/@prisma/config node_modules/deepmerge-ts node_modules/effect \
  && node scripts/runtime-dependency-check.mjs node_modules
 
-FROM node:24.15.0-bookworm-slim@sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d AS runtime
+FROM node:24.19.0-bookworm-slim@sha256:e5a8dee7bc1e6a215d224a7ef8206f7e77271bc3cabd5febf2beafac0674f174 AS runtime
 ENV NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0
 WORKDIR /app
 COPY --from=production-deps --chown=node:node /src/node_modules ./node_modules
@@ -31,6 +31,11 @@ COPY --from=builder --chown=node:node /src/apps/web/.next/static ./apps/web/.nex
 COPY --from=builder --chown=node:node /src/dist ./dist
 COPY --chown=node:node scripts/container-entrypoint.mjs ./scripts/container-entrypoint.mjs
 COPY --chown=node:node scripts/runtime-dependency-check.mjs ./scripts/runtime-dependency-check.mjs
+# The production entrypoint executes Node directly; keep the package manager out
+# of the runtime image to reduce attack surface and avoid shipping its build-time
+# dependency tree.
+RUN rm -rf /usr/local/lib/node_modules/npm \
+ && rm -f /usr/local/bin/npm /usr/local/bin/npx
 USER 1000:1000
 EXPOSE 3000
 ENTRYPOINT ["node","scripts/container-entrypoint.mjs"]
