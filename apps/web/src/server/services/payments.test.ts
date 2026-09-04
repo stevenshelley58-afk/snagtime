@@ -84,7 +84,7 @@ describe("payment provider boundary", () => {
     });
     const signature = Stripe.webhooks.generateTestHeaderString({ payload, secret: "whsec_unit" });
     vi.stubEnv("BLOCKWISE_WEBHOOK_URL", ""); vi.stubEnv("BLOCKWISE_WEBHOOK_SECRET", "");
-    await expect(processStripeWebhook(payload, signature)).rejects.toThrow(/BLOCKWISE_WEBHOOK_NOT_CONFIGURED/);
+    await expect(processStripeWebhook(payload, signature)).rejects.toMatchObject({ code: "BLOCKWISE_WEBHOOK_NOT_CONFIGURED", status: 503 });
     expect(await db.booking.findUniqueOrThrow({ where: { id: bookingId } })).toMatchObject({ status: "PENDING_PAYMENT", stripePaymentStatus: "unpaid", stripePaymentIntentId: null });
     vi.stubEnv("BLOCKWISE_WEBHOOK_URL", "https://blockwise.example/webhook"); vi.stubEnv("BLOCKWISE_WEBHOOK_SECRET", "blockwise-payment-test-secret-with-at-least-32-bytes");
     expect(await processStripeWebhook(payload, signature)).toEqual({ duplicate: false, eventId });
