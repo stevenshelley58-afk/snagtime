@@ -118,12 +118,9 @@ jobs:
           printf '%s' 'whsec_ci' > ci-certs/STRIPE_WEBHOOK_SECRET
           printf '%s' 'ci-smtp-password' > ci-certs/SMTP_PASSWORD
           secret_dir="$GITHUB_WORKSPACE/runtime-secrets"
-          mkdir -p "$secret_dir"
-          cp ci-certs/ca.crt "$secret_dir/ci-ca"
-          cp ci-certs/DATABASE_URL ci-certs/WORKER_DATABASE_URL ci-certs/MONITOR_DATABASE_URL ci-certs/AUTH_SECRET ci-certs/BOOKING_CAPABILITY_SECRET ci-certs/BOOKING_CAPABILITY_KEYRING ci-certs/RATE_LIMIT_HASH_SECRET ci-certs/TENANT_CONTEXT_SECRET ci-certs/TOKEN_ENCRYPTION_KEY ci-certs/PROXY_SHARED_SECRET ci-certs/OPERATOR_HEALTH_SECRET ci-certs/GOOGLE_CLIENT_SECRET ci-certs/EMAIL_TOKEN_SECRET ci-certs/BLOCKWISE_WEBHOOK_SECRET ci-certs/STRIPE_SECRET_KEY ci-certs/STRIPE_WEBHOOK_SECRET ci-certs/SMTP_PASSWORD "$secret_dir/"
-          chown -R 1000:1000 "$secret_dir"
-          chmod 700 "$secret_dir"
-          chmod 400 "$secret_dir"/*
+          sudo install -d -o 1000 -g 1000 -m 0700 "$secret_dir"
+          sudo install -o 1000 -g 1000 -m 0400 ci-certs/ca.crt "$secret_dir/ci-ca"
+          for source in ci-certs/DATABASE_URL ci-certs/WORKER_DATABASE_URL ci-certs/MONITOR_DATABASE_URL ci-certs/AUTH_SECRET ci-certs/BOOKING_CAPABILITY_SECRET ci-certs/BOOKING_CAPABILITY_KEYRING ci-certs/RATE_LIMIT_HASH_SECRET ci-certs/TENANT_CONTEXT_SECRET ci-certs/TOKEN_ENCRYPTION_KEY ci-certs/PROXY_SHARED_SECRET ci-certs/OPERATOR_HEALTH_SECRET ci-certs/GOOGLE_CLIENT_SECRET ci-certs/EMAIL_TOKEN_SECRET ci-certs/BLOCKWISE_WEBHOOK_SECRET ci-certs/STRIPE_SECRET_KEY ci-certs/STRIPE_WEBHOOK_SECRET ci-certs/SMTP_PASSWORD; do sudo install -o 1000 -g 1000 -m 0400 "$source" "$secret_dir/$(basename "$source")"; done
           docker run --rm --user 1000:1000 --volume "$secret_dir:/run/secrets:ro" \
             --env DATABASE_URL_FILE=/run/secrets/DATABASE_URL --env WORKER_DATABASE_URL_FILE=/run/secrets/WORKER_DATABASE_URL --env MONITOR_DATABASE_URL_FILE=/run/secrets/MONITOR_DATABASE_URL \
             --env AUTH_SECRET_FILE=/run/secrets/AUTH_SECRET --env BOOKING_CAPABILITY_SECRET_FILE=/run/secrets/BOOKING_CAPABILITY_SECRET --env BOOKING_CAPABILITY_KEYRING_FILE=/run/secrets/BOOKING_CAPABILITY_KEYRING \
@@ -161,11 +158,11 @@ jobs:
             --env STRIPE_WEBHOOK_SECRET_FILE=/run/secrets/STRIPE_WEBHOOK_SECRET \
             --env CALENDAR_PROVIDER=google \
             --env GOOGLE_CLIENT_ID=ci-proof.apps.googleusercontent.com \
-            --env GOOGLE_CLIENT_SECRET=ci-google-client-secret-000001 \
+            --env GOOGLE_CLIENT_SECRET_FILE=/run/secrets/GOOGLE_CLIENT_SECRET \
             --env EMAIL_PROVIDER=smtp \
             --env SMTP_TLS_MODE=starttls \
             --env SMTP_HOST=smtp.invalid --env SMTP_PORT=465 --env SMTP_USER=ci --env SMTP_PASSWORD_FILE=/run/secrets/SMTP_PASSWORD \
-            --env EMAIL_TOKEN_SECRET=ci-email-token-secret-0000000000000001 \
+            --env EMAIL_TOKEN_SECRET_FILE=/run/secrets/EMAIL_TOKEN_SECRET \
             --env EMAIL_FROM=ci@example.invalid --env EMAIL_REPLY_TO=ci@example.invalid --env EMAIL_SENDER_DOMAIN=example.invalid \
             snagtime:${GITHUB_SHA})
           trap 'docker logs "$cid" || true; docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
