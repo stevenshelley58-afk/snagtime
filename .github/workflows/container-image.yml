@@ -131,11 +131,8 @@ jobs:
           exit 1
 
       - name: Scan actionable vulnerabilities
-        env:
-          TRIVY_IMAGE_SHA256: ${{ vars.TRIVY_IMAGE_SHA256 }}
         run: |
-          test -n "$TRIVY_IMAGE_SHA256" || { echo 'Set repository variable TRIVY_IMAGE_SHA256 to an approved aquasec/trivy image digest.' >&2; exit 1; }
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "aquasec/trivy@sha256:${TRIVY_IMAGE_SHA256}" image --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed snagtime:${GITHUB_SHA}
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969" image --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed snagtime:${GITHUB_SHA}
 
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
