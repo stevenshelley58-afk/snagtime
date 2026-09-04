@@ -27,6 +27,7 @@
     "ci:container-image-secret-contract": "node scripts/ci-container-image-secret-contract.mjs",
     "ci:audit-policy": "node scripts/ci-audit-policy.mjs",
     "ci:generated-drift": "node scripts/ci-generated-drift.mjs",
+    "ci:generated-drift:test": "node --test scripts/ci-generated-drift.test.mjs",
     "ci:postgres-guards": "node scripts/postgres-guard-check.mjs",
     "ci:postgres-runtime": "tsx --tsconfig apps/web/tsconfig.json scripts/postgres-runtime-check.mjs",
     "ci:postgres-rate-policies": "node scripts/postgres-rate-policy-check.mjs",

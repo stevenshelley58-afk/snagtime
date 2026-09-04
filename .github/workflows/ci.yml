@@ -67,7 +67,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with: { fetch-depth: 0 }
       - run: npm ci --ignore-scripts
-      - run: npm run ci:generated-drift && npm run db:generate && npm run db:generate:postgres
+      - run: npm run ci:generated-drift:test && npm run ci:generated-drift && npm run db:generate && npm run db:generate:postgres
       - run: npx prisma migrate deploy --schema prisma/postgresql/schema.prisma
       - name: Provision isolated runtime roles after validating every ephemeral secret
         run: npm run db:provision:postgres-logins

@@ -140,7 +140,7 @@ function parseResult(value: string | null): BlockwiseBookingActionResult | null 
 async function refreshCalendarReceipt(receipt: { id: string; bookingId: string; expectedVersion: number; action: string }, result: BlockwiseBookingActionResult) {
   const effect = await db.integrationOutbox.findFirst({ where: { bookingId: receipt.bookingId, bookingMutationVersion: receipt.expectedVersion + 1, kind: receipt.action === "booking_cancel" ? "CALENDAR_DELETE" : "CALENDAR_UPDATE" }, orderBy: { createdAt: "desc" } });
   const booking = await db.booking.findUnique({ where: { id: receipt.bookingId }, select: { calendarSyncStatus: true } });
-  const calendarStatus = !effect || ["PENDING", "RETRY", "PROCESSING"].includes(effect.status) ? "PENDING"
+  const calendarStatus: BlockwiseBookingActionResult["calendarStatus"] = !effect || ["PENDING", "RETRY", "PROCESSING"].includes(effect.status) ? "PENDING"
     : effect.status === "DEAD" ? "FAILED"
       : effect.status === "COMPLETED" && ["STALE_CALENDAR_UPDATE", "SUPERSEDED_BY_RECOVERY_DELETE"].includes(effect.lastErrorCode || "") ? "SUPERSEDED"
         : effect.status === "COMPLETED" && !effect.lastErrorCode && booking?.calendarSyncStatus === "SYNCED" ? "SYNCED"
