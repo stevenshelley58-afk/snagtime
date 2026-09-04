@@ -28,5 +28,5 @@ if (mode !== "migration") {
   const senderDomain = (process.env.EMAIL_SENDER_DOMAIN || "").toLowerCase(); const mailbox = (process.env.EMAIL_FROM || "").match(/<([^<>]+)>$/)?.[1] || process.env.EMAIL_FROM || "";
   if (!process.env.EMAIL_REPLY_TO || !senderDomain || !mailbox.toLowerCase().endsWith(`@${senderDomain}`)) errors.push("system email sender and Reply-To contract incomplete");
 }
-if (errors.length) { console.error(`Production configuration rejected (${errors.length} invariant violations).`); process.exit(1); }
+if (errors.length) { console.error(`Production configuration rejected (${errors.length} invariant violations): ${errors.join("; ")}`); process.exit(1); }
 console.log(`Production ${mode} configuration contract passed without printing values.`);
