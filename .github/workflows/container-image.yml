@@ -66,11 +66,17 @@ jobs:
           docker exec "$PG_CONTAINER" psql -U postgres -d snagtime_ci -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET ssl_key_file = '/var/lib/postgresql/server.key'"
           docker restart "$PG_CONTAINER" >/dev/null
           for attempt in $(seq 1 20); do docker exec "$PG_CONTAINER" pg_isready -U postgres -d snagtime_ci && break || sleep 1; done
-          npm install --ignore-scripts --no-audit --no-fund
-          npm run db:generate:postgres
-          npx prisma migrate deploy --schema prisma/postgresql/schema.prisma
-          npm run db:provision:postgres-logins
-          node --input-type=module -e "import pg from 'pg'; import fs from 'node:fs'; const c=new pg.Client({connectionString:process.env.WORKER_DATABASE_URL,ssl:{rejectUnauthorized:true,ca:fs.readFileSync('ci-certs/ca.crt','utf8')}}); await c.connect(); await c.query('INSERT INTO \"WorkerHeartbeat\" (\"workerId\",\"lastSeenAt\",\"status\",\"buildId\") VALUES (\$1,clock_timestamp(),\$2,\$3) ON CONFLICT (\"workerId\") DO UPDATE SET \"lastSeenAt\"=EXCLUDED.\"lastSeenAt\",\"status\"=EXCLUDED.\"status\",\"buildId\"=EXCLUDED.\"buildId\"',['ci-worker','IDLE',process.env.GITHUB_SHA]); await c.end();"
+          network=$(docker inspect "$PG_CONTAINER" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}')
+          docker run --rm --network "$network" \
+            --volume "$GITHUB_WORKSPACE:/workspace" --workdir /workspace \
+            --env DATABASE_URL='postgresql://postgres:ci-only-ephemeral@postgres:5432/snagtime_ci?sslmode=verify-full&sslrootcert=/workspace/ci-certs/ca.crt&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000' \
+            --env WORKER_DATABASE_URL='postgresql://tempocove_worker_login:CI-Worker-Database-Password-0000000001@postgres:5432/snagtime_ci?sslmode=verify-full&sslrootcert=/workspace/ci-certs/ca.crt&connect_timeout=3&pool_timeout=20&connection_limit=20&statement_timeout=2000' \
+            --env TENANT_CONTEXT_SECRET="$TENANT_CONTEXT_SECRET" \
+            --env TEMPOCOVE_APP_DB_PASSWORD="$TEMPOCOVE_APP_DB_PASSWORD" --env TEMPOCOVE_WORKER_DB_PASSWORD="$TEMPOCOVE_WORKER_DB_PASSWORD" \
+            --env TEMPOCOVE_MONITOR_DB_PASSWORD="$TEMPOCOVE_MONITOR_DB_PASSWORD" --env TEMPOCOVE_MIGRATION_DB_PASSWORD="$TEMPOCOVE_MIGRATION_DB_PASSWORD" \
+            --env GITHUB_SHA="$GITHUB_SHA" \
+            node:24.15.0-bookworm-slim@sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d \
+            sh -eu -c 'npm install --ignore-scripts --no-audit --no-fund && npm run db:generate:postgres && npx prisma migrate deploy --schema prisma/postgresql/schema.prisma && npm run db:provision:postgres-logins && node --input-type=module -e "import pg from \"pg\"; import fs from \"node:fs\"; const c=new pg.Client({connectionString:process.env.WORKER_DATABASE_URL,ssl:{rejectUnauthorized:true,ca:fs.readFileSync(\"ci-certs/ca.crt\",\"utf8\")}}); await c.connect(); await c.query(\"INSERT INTO \\\"WorkerHeartbeat\\\" (\\\"workerId\\\",\\\"lastSeenAt\\\",\\\"status\\\",\\\"buildId\\\") VALUES (\\$1,clock_timestamp(),\\$2,\\$3) ON CONFLICT (\\\"workerId\\\") DO UPDATE SET \\\"lastSeenAt\\\"=EXCLUDED.\\\"lastSeenAt\\\",\\\"status\\\"=EXCLUDED.\\\"status\\\",\\\"buildId\\\"=EXCLUDED.\\\"buildId\\\"\",[\"ci-worker\",\"IDLE\",process.env.GITHUB_SHA]); await c.end();"'
         working-directory: ${{ github.workspace }}
 
       - name: Set up BuildKit
